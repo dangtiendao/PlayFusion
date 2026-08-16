@@ -17,6 +17,9 @@ dist-ssr
 # Coverage
 coverage
 
+# Dependency graph artifact
+docs/dependency-graph.html
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

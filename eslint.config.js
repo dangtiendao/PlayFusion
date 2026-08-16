@@ -22,6 +22,18 @@ export default tseslint.config(
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
     },
   },
+  {
+    files: ['**/*.cjs'],
+    languageOptions: {
+      sourceType: 'commonjs',
+      globals: {
+        module: 'writable',
+        require: 'readonly',
+        __dirname: 'readonly',
+        __filename: 'readonly',
+      },
+    },
+  },
   // ==============================================================================
   // RULE KIẾN TRÚC BẤT BIẾN (ARCHITECTURAL BOUNDARY INVARIANT):
   // Các module bên trong packages/engines/** là Game Engine logic thuần túy (Pure TS).
