@@ -1,0 +1,18 @@
+# ==============================================================================
+# CLOUDFLARE PAGES HEADERS & CACHE CONTROL
+# ==============================================================================
+
+# 1. Static Assets có hash trong tên file: Cache bất biến 1 năm
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# 2. HTML Entry Point: Không cache dài hạn để client nhận bản mới ngay khi deploy
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
+
+# 3. Security Headers toàn cục
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: SAMEORIGIN
+  Permissions-Policy: camera=(), microphone=(), geolocation=()

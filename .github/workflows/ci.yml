@@ -1,0 +1,66 @@
+name: CI Quality Gate
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - main
+      - master
+
+# Tiết kiệm quota: Tự động hủy job đang chạy nếu có commit mới trên cùng branch/PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-gate:
+    name: Kiểm Tra Chất Lượng & Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10 # Giới hạn tối đa 10 phút tránh treo ngốn quota runner
+
+    steps:
+      - name: 1. Checkout mã nguồn
+        uses: actions/checkout@v4
+
+      - name: 2. Cài đặt môi trường Node.js từ .nvmrc
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: 3. Cài đặt dependencies sạch (npm ci)
+        run: npm ci
+
+      - name: 4. Cổng 1 - Kiểm tra Lint & Ranh giới kiến trúc Engine (ESLint)
+        run: npm run lint
+
+      - name: 5. Cổng 2 - Kiểm tra Định dạng Code (Prettier)
+        run: npm run format:check
+
+      - name: 6. Cổng 3 - Kiểm tra Kiểu dữ liệu & Cô lập DOM (TypeScript tsc -b)
+        run: npm run typecheck
+
+      - name: 7. Cổng 4 - Kiểm tra Hàng rào phụ thuộc & Circular Dependencies
+        run: npm run check:deps
+
+      - name: 8. Cổng 5 - Chạy Unit Tests trên môi trường Node (Vitest)
+        run: npm run test
+
+      - name: 9. Cổng 6 - Build Sản phẩm Production (Vite)
+        run: npm run build
+
+      # ========================================================================
+      # QUYẾT ĐỊNH THIẾT KẾ:
+      # KHÔNG thực hiện deploy trong workflow này.
+      # Việc deploy lên Cloudflare Pages sẽ do Cloudflare Pages tự động lắng nghe
+      # Git commit và trigger build độc lập tại Phase P0.3b.
+      # ========================================================================
+      - name: 10. Lưu trữ Artifact Build (dist)
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-dist
+          path: dist/
+          retention-days: 5
+          if-no-files-found: error

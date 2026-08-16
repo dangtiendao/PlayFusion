@@ -1,0 +1,8 @@
+# ==============================================================================
+# CLOUDFLARE PAGES SPA FALLBACK ROUTING
+# ==============================================================================
+# Mọi request đến đường dẫn con (ví dụ /caro, /profile, /settings) đều được trả về
+# file /index.html với HTTP status code 200, cho phép React Router ở client-side
+# tiếp nhận và điều hướng mà không bị lỗi 404 Not Found khi người dùng refresh trang.
+# ==============================================================================
+/*    /index.html   200
