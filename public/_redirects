@@ -1,8 +1,9 @@
 # ==============================================================================
 # CLOUDFLARE PAGES SPA FALLBACK ROUTING
 # ==============================================================================
-# Mọi request đến đường dẫn con (ví dụ /caro, /profile, /settings) đều được trả về
-# file /index.html với HTTP status code 200, cho phép React Router ở client-side
-# tiếp nhận và điều hướng mà không bị lỗi 404 Not Found khi người dùng refresh trang.
+# Cloudflare Pages tự động chuẩn hóa URL (URL normalization) bằng cách loại bỏ
+# đuôi .html hoặc /index.
+# Do đó, rule rewrite SPA trên Cloudflare Pages sử dụng target "/" thay vì
+# "/index.html" để tránh Infinite Loop (Error Code 100324).
 # ==============================================================================
-/*    /index.html   200
+/*    /    200
