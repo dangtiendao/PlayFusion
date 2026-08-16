@@ -85,5 +85,5 @@ Mỗi lần `push` hoặc tạo `Pull Request` lên GitHub, workflow [.github/wo
 
 ### 2. Cấu hình định tuyến & Caching
 
-- [`public/_redirects`](public/_redirects): Khai báo fallback rule `/* /index.html 200` đảm bảo không bị lỗi 404 khi hard-refresh trên các route con của SPA.
+- **SPA Fallback Routing**: Cloudflare Pages tự động hỗ trợ cơ chế Single Page Application (SPA) nguyên bản — mọi request không trùng với static file trong `dist/` sẽ tự động được phục vụ `index.html` với mã HTTP 200.
 - [`public/_headers`](public/_headers): Cấu hình cache `immutable` 1 năm cho assets có hash (`/assets/*`), chống cache cho `/index.html` để cập nhật phiên bản mới tức thì, và các security headers (`X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`).

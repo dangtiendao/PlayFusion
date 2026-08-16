@@ -1,9 +1,0 @@
-# ==============================================================================
-# CLOUDFLARE PAGES SPA FALLBACK ROUTING
-# ==============================================================================
-# Cloudflare Pages tự động chuẩn hóa URL (URL normalization) bằng cách loại bỏ
-# đuôi .html hoặc /index.
-# Do đó, rule rewrite SPA trên Cloudflare Pages sử dụng target "/" thay vì
-# "/index.html" để tránh Infinite Loop (Error Code 100324).
-# ==============================================================================
-/*    /    200
