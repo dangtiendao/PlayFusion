@@ -1,30 +1,36 @@
 import { useRegisterSW } from 'virtual:pwa-register/react';
+import { useSettingsStore } from '@/stores/settingsStore';
+import { APP_CONFIG } from '@/config/app';
 
 /**
  * ==============================================================================
  * COMPONENT THÔNG BÁO CẬP NHẬT PHIÊN BẢN MỚI (UPDATE PROMPT)
  * ==============================================================================
  *
- * TÀI LIỆU KỸ THUẬT & QUY TẮC THIẾT KẾ:
+ * GHI CHÚ KIẾN TRÚC & TRẢ NỢ KỸ THUẬT:
  *
  * 1. CƠ CHẾ CẬP NHẬT SERVICE WORKER (registerType: 'prompt'):
  *    - Khi Service Worker phát hiện có bản build mới tải về ở chế độ nền (precache hash mới),
  *      biến `needRefresh` chuyển sang `true`.
- *    - Người chơi bấm "Cập nhật" -> gọi `updateServiceWorker(true)` để kích hoạt SW mới
+ *    - Người chơi bấm "Cập nhật ngay" -> gọi `updateServiceWorker(true)` để kích hoạt SW mới
  *      và reload trang tức thì sang phiên bản mới.
- *    - Người chơi bấm "✕" -> ẩn toast trong phiên hiện tại (`setNeedRefresh(false)`).
  *
- * 2. GHI CHÚ VỀ LƯU TRỮ (PERSISTENCE):
- *    - Việc lưu trạng thái tạm hoãn cập nhật vào localStorage thuộc phạm vi Phase P0.8
- *      thông qua `storage.ts`. Ở phase này chỉ quản lý in-memory trong phiên.
+ * 2. PERSISTENCE BỎ QUA CẬP NHẬT (DISMISS PERSISTENCE):
+ *    - Khi người chơi bấm "✕" hoặc "Để sau" -> gọi `dismissUpdate(APP_CONFIG.version)` lưu
+ *      phiên bản bị hoãn vào `settingsStore` (localStorage).
+ *    - Nếu người chơi reload lại trang ở cùng phiên bản đó, thông báo sẽ không làm phiền nữa.
+ *    - Khi có phiên bản MỚI HƠN xuất hiện, thông báo sẽ tự động hiển thị lại.
  *
  * 3. GHI CHÚ KIẾN TRÚC TƯƠNG LAI (PHASE P3.x):
  *    - Khi tích hợp chế độ đấu Online (P3.x), KHÔNG hiển thị Prompt này nếu người chơi
  *      đang ở trong phòng đấu (ví dụ `isInMatch === true`) để tránh che màn hình hoặc
- *      gây bấm nhầm làm mất ván cờ. Điều kiện này sẽ được bổ sung tại Phase P3.x.
+ *      gây bấm nhầm làm mất ván cờ.
  * ==============================================================================
  */
 export function UpdatePrompt() {
+  const dismissedUpdateVersion = useSettingsStore((state) => state.dismissedUpdateVersion);
+  const dismissUpdate = useSettingsStore((state) => state.dismissUpdate);
+
   const {
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,
@@ -44,10 +50,13 @@ export function UpdatePrompt() {
   };
 
   const handleClose = () => {
+    // Lưu lại phiên bản hiện tại đã bị người dùng hoãn cập nhật
+    dismissUpdate(APP_CONFIG.version);
     setNeedRefresh(false);
   };
 
-  if (!needRefresh) {
+  // Không hiển thị nếu không có cập nhật hoặc phiên bản này đã bị người dùng bấm "Để sau"
+  if (!needRefresh || dismissedUpdateVersion === APP_CONFIG.version) {
     return null;
   }
 

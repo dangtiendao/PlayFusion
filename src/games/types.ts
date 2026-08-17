@@ -1,5 +1,5 @@
 import type React from 'react';
-import type { GameDefinition } from '@engines/types';
+import type { GameDefinition, MatchResultReport } from '@engines/types';
 
 /**
  * ==============================================================================
@@ -13,15 +13,36 @@ import type { GameDefinition } from '@engines/types';
  */
 
 /**
+ * Bộ API tiện ích do GameShell cung cấp cho View của trò chơi.
+ * Giúp View gọi âm thanh, rung mà không cần phụ thuộc trực tiếp vào module core, giúp dễ mock khi test.
+ */
+export interface GameShellApi {
+  /** Phát hiệu ứng âm thanh qua Web Audio API của shell */
+  readonly playSfx: (key: string, options?: { volume?: number }) => void;
+  /** Rung nhẹ phản hồi xúc giác (15ms) */
+  readonly hapticTap: () => void;
+  /** Rung thành công (mô thức thắng ván) */
+  readonly hapticSuccess: () => void;
+  /** Rung cảnh báo (mô thức đi sai/thua) */
+  readonly hapticError: () => void;
+}
+
+/**
  * Props cơ sở được truyền vào mọi Component View của trò chơi (`src/games/<gameId>/View.tsx`).
  *
  * GHI CHÚ MỞ RỘNG (EXTENSIBILITY):
- * - Phase P0.8 (GameShell) và Phase P1.x sẽ mở rộng props này (ví dụ: `mode`, `onGameOver`, `localPlayerSeat`...).
+ * - Đã mở rộng tại Phase P0.8c để tích hợp cùng GameShell (`isPaused`, `onGameEnd`, `shellApi`).
  * - NGUYÊN TẮC: Chỉ THÊM các trường optional mới, tuyệt đối KHÔNG sửa đổi hoặc xóa các trường đã có.
  */
 export interface GameViewProps {
-  /** Tờ khai năng lực (Manifest) của trò chơi */
+  /** Tờ khai năng lực (Manifest) của trò chơi (Bất biến từ P0.7a) */
   readonly definition: GameDefinition;
+  /** Cờ báo trạng thái trò chơi đang tạm dừng (Pause) do người dùng mở Pause Overlay */
+  readonly isPaused?: boolean;
+  /** Callback thông báo kết quả khi ván đấu kết thúc (P1.4 màn hình kết thúc & P2.5 lưu lịch sử sẽ tiêu thụ) */
+  readonly onGameEnd?: (report: MatchResultReport) => void;
+  /** Bộ API tiện ích do GameShell cung cấp (âm thanh, rung) */
+  readonly shellApi?: GameShellApi;
 }
 
 /**

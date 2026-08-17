@@ -1,6 +1,7 @@
 import { type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useOnlineStatus } from '@/core/useOnlineStatus';
+import { useGameSessionStore } from '@/stores/gameSessionStore';
 
 /**
  * Interface định nghĩa một mục trên thanh điều hướng.
@@ -38,22 +39,18 @@ export interface AppShellProps {
  *    - Mobile (< 768px - breakpoint md): Sử dụng BottomNav cố định ở đáy màn hình.
  *    - Desktop (>= 768px - breakpoint md): Sử dụng Sidebar cố định bên trái, BottomNav ẩn đi.
  *
- * 2. VÙNG CHẠM TOUCH TARGET ĐẠT CHUẨN (>= 44x44px):
- *    - Mọi nút bấm trên BottomNav và Sidebar đều được thiết lập `min-h-[44px] min-w-[44px]`
- *      đáp ứng tiêu chuẩn công thái học Mobile-First của Apple và Google.
+ * 2. TỐI ƯU TOÀN BỘ KHÔNG GIAN CHO VÁN ĐẤU (isInGame):
+ *    - Đọc `isInGame` từ `useGameSessionStore`.
+ *    - Khi người chơi đang trong trận (`isInGame === true`), tự động ẩn `BottomNav` trên mobile
+ *      để người chơi không bị che khuất bàn cờ và có trải nghiệm nhập vai trọn vẹn.
  *
- * 3. VÙNG AN TOÀN TRÀN VIỀN (Safe Area Insets):
+ * 3. VÙNG CHẠM TOUCH TARGET ĐẠT CHUẨN (>= 44x44px):
+ *    - Mọi nút bấm trên BottomNav và Sidebar đều được thiết lập `min-h-[44px] min-w-[44px]`.
+ *
+ * 4. VÙNG AN TOÀN TRÀN VIỀN (Safe Area Insets):
  *    - Header: padding-top `env(safe-area-inset-top)`
  *    - BottomNav: padding-bottom `env(safe-area-inset-bottom)`
  *    - Main: padding-left & padding-right `env(safe-area-inset-left/right)`
- *
- * 4. CÔ LẬP VÙNG CUỘN (Single Scroll Container):
- *    - html, body, #root bị khóa cuộn.
- *    - DUY NHẤT thẻ `<main>` được cuộn (`overflow-y: auto`, `overscroll-contain`).
- *
- * 5. TRẠNG THÁI OFFLINE (P0.5b):
- *    - Khi mất kết nối internet, hiển thị banner thông báo nhẹ nhàng (non-blocking).
- *    - Các game offline (Pass & Play, chơi với AI ở Phase P1.x) vẫn chơi bình thường.
  * ==============================================================================
  */
 export function AppShell({
@@ -65,6 +62,7 @@ export function AppShell({
 }: AppShellProps) {
   const location = useLocation();
   const isOnline = useOnlineStatus();
+  const isInGame = useGameSessionStore((state) => state.isInGame);
 
   // Xác định trang hiện tại để hiển thị tên trên Header
   const currentNav = navItems.find((item) => item.path === location.pathname);
@@ -137,8 +135,6 @@ export function AppShell({
       <div className="flex flex-col flex-1 min-w-0 h-full overflow-hidden">
         {/* 
           A. HEADER TRÊN ĐỈNH
-          - Mobile: Hiển thị Logo + Tên trang hiện tại + Action
-          - Desktop: Hiển thị Tên trang hiện tại + Action
         */}
         <header className="flex-none w-full bg-surface/90 dark:bg-surface-dark/90 backdrop-blur-md border-b border-surface-border dark:border-surface-dark-border z-30 pt-safe">
           <div className="w-full max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
@@ -177,9 +173,6 @@ export function AppShell({
 
         {/* 
           C. VÙNG MAIN (VÙNG CUỘN DUY NHẤT TRONG TOÀN BỘ ỨNG DỤNG)
-          - flex-1 overflow-y-auto: Cuộn nội dung mượt mà
-          - overscroll-contain: Chặn bounce giật toàn trang
-          - pl-safe & pr-safe: Bảo vệ nội dung khi xoay ngang (Landscape)
         */}
         <main
           id="app-main-scroll"
@@ -191,34 +184,34 @@ export function AppShell({
 
         {/* 
           D. MOBILE BOTTOM NAVIGATION (HIỂN THỊ DƯỚI BREAKPOINT MD - < 768px)
-          - pb-safe: Padding thêm safe-area-inset-bottom cho thanh Home Bar của iPhone
-          - Ẩn trên desktop (md:hidden)
-          - Vùng chạm mỗi nút tối thiểu 44x44px
+          - TỰ ĐỘNG ẨN KHI ĐANG Ở TRONG TRẬN ĐẤU (isInGame = true)
         */}
-        <nav
-          aria-label="Thanh điều hướng Mobile"
-          className="flex md:hidden flex-none w-full bg-surface/90 dark:bg-surface-dark/90 backdrop-blur-md border-t border-surface-border dark:border-surface-dark-border z-30 pb-safe"
-        >
-          <div className="w-full max-w-lg mx-auto px-2 h-16 flex items-center justify-around">
-            {navItems.map((item) => (
-              <NavLink
-                key={item.path}
-                to={item.path}
-                end={item.path === '/'}
-                className={({ isActive }) =>
-                  `flex flex-col items-center justify-center min-h-[44px] min-w-[44px] flex-1 py-1 rounded-lg text-[11px] font-medium transition-all ${
-                    isActive
-                      ? 'text-primary-600 dark:text-primary-400 font-semibold'
-                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                  }`
-                }
-              >
-                <span className="flex items-center justify-center w-6 h-6">{item.icon}</span>
-                <span className="truncate leading-tight mt-0.5">{item.label}</span>
-              </NavLink>
-            ))}
-          </div>
-        </nav>
+        {!isInGame && (
+          <nav
+            aria-label="Thanh điều hướng Mobile"
+            className="flex md:hidden flex-none w-full bg-surface/90 dark:bg-surface-dark/90 backdrop-blur-md border-t border-surface-border dark:border-surface-dark-border z-30 pb-safe animate-fadeIn"
+          >
+            <div className="w-full max-w-lg mx-auto px-2 h-16 flex items-center justify-around">
+              {navItems.map((item) => (
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  end={item.path === '/'}
+                  className={({ isActive }) =>
+                    `flex flex-col items-center justify-center min-h-[44px] min-w-[44px] flex-1 py-1 rounded-lg text-[11px] font-medium transition-all ${
+                      isActive
+                        ? 'text-primary-600 dark:text-primary-400 font-semibold'
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`
+                  }
+                >
+                  <span className="flex items-center justify-center w-6 h-6">{item.icon}</span>
+                  <span className="truncate leading-tight mt-0.5">{item.label}</span>
+                </NavLink>
+              ))}
+            </div>
+          </nav>
+        )}
       </div>
     </div>
   );

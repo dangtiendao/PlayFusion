@@ -1,16 +1,19 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useSettingsStore, type ThemePreference } from '@/stores/settingsStore';
 
 export type ThemeMode = 'light' | 'dark';
 
 export interface UseThemeReturn {
-  /** Theme hiện tại đang active ('light' hoặc 'dark') */
+  /** Theme thực tế đang được áp dụng trên DOM ('light' hoặc 'dark') */
   readonly theme: ThemeMode;
-  /** True nếu đang ở chế độ Dark Mode */
+  /** Lựa chọn theme cấu hình trong cài đặt ('light' | 'dark' | 'system') */
+  readonly themePreference: ThemePreference;
+  /** True nếu giao diện thực tế đang ở chế độ Dark Mode */
   readonly isDark: boolean;
-  /** Hàm chuyển đổi giữa Sáng và Tối */
+  /** Hàm chuyển đổi qua lại giữa Sáng và Tối */
   readonly toggleTheme: () => void;
-  /** True nếu người dùng đã tự toggle thủ công trong phiên làm việc hiện tại */
-  readonly hasManualOverride: boolean;
+  /** Hàm thiết lập trực tiếp cấu hình theme */
+  readonly setTheme: (theme: ThemePreference) => void;
 }
 
 const LIGHT_THEME_COLOR = '#f8fafc';
@@ -18,59 +21,66 @@ const DARK_THEME_COLOR = '#0f172a';
 
 /**
  * ==============================================================================
- * HOOK QUẢN LÝ THEME GIAO DIỆN (LIGHT / DARK MODE)
+ * HOOK QUẢN LÝ THEME GIAO DIỆN (PERSISTED THEME MANAGER)
  * ==============================================================================
  *
- * TÀI LIỆU KỸ THUẬT & QUY TẮC KIẾN TRÚC:
- *
- * 1. KHỞI TẠO THEO HỆ ĐIỀU HÀNH (OS Preferred Color Scheme):
- *    - Khi mở ứng dụng lần đầu, hook tự động kiểm tra `window.matchMedia('(prefers-color-scheme: dark)')`
- *      để hiển thị đúng theme người dùng đã cài đặt trên máy.
- *
- * 2. LẮNG NGHE THAY ĐỔI HỆ ĐIỀU HÀNH REAL-TIME:
- *    - Đăng ký listener trên MediaQueryList. Nếu người dùng đổi chế độ Dark/Light của điện thoại
- *      trong khi đang mở web, app sẽ tự động chuyển theo NẾU người dùng chưa toggle thủ công
- *      trong phiên hiện tại.
- *
- * 3. ĐỒNG BỘ THẺ META THEME-COLOR:
- *    - Cập nhật nội dung thẻ `<meta name="theme-color">` bằng JavaScript khi đổi theme
- *      để thanh trạng thái trình duyệt di động (iOS Safari & Android Chrome) đồng bộ màu sắc.
- *
- * 4. GHI CHÚ KIẾN TRÚC VỀ LƯU TRỮ (PERSISTENCE):
- *    - Trạng thái theme trong phase này được lưu in-memory trong phiên làm việc.
- *    - Việc lưu lựa chọn vào localStorage sẽ được chuẩn hóa tại Phase P0.8 thông qua
- *      module lưu trữ tập trung `src/core/storage.ts` để đảm bảo tính nhất quán.
+ * GHI CHÚ KIẾN TRÚC & TRẢ NỢ KỸ THUẬT:
+ * 1. PERSISTENCE TOÀN DIỆN:
+ *    - Đọc và lưu cấu hình theme qua `useSettingsStore` (được lưu bền vững trong localStorage
+ *      với prefix `wgh:v1:settings`).
+ * 2. HỖ TRỢ CHẾ ĐỘ 'SYSTEM' LINH HOẠT:
+ *    - Khi `themePreference === 'system'`, hook tự động lắng nghe `matchMedia` và đồng bộ
+ *      theo cài đặt Sáng/Tối của hệ điều hành.
+ * 3. ĐỒNG BỘ DOM & META THEME-COLOR:
+ *    - Tự động gán/xóa class `dark` trên thẻ `<html>` và cập nhật thẻ `<meta name="theme-color">`
+ *      để thanh trạng thái trình duyệt di động (iOS Safari & Android Chrome) đồng bộ hoàn hảo.
  * ==============================================================================
  */
 export function useTheme(): UseThemeReturn {
-  // 1. Xác định theme khởi tạo từ hệ điều hành
-  const [theme, setTheme] = useState<ThemeMode>(() => {
+  const themePreference = useSettingsStore((state) => state.theme);
+  const setThemePreference = useSettingsStore((state) => state.setTheme);
+
+  // Trạng thái theme hệ điều hành thực tế
+  const [systemIsDark, setSystemIsDark] = useState<boolean>(() => {
     if (typeof window !== 'undefined' && window.matchMedia) {
-      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
     }
-    return 'light';
+    return false;
   });
 
-  // Đánh dấu người dùng đã toggle thủ công trong phiên hay chưa
-  const [hasManualOverride, setHasManualOverride] = useState<boolean>(false);
+  // 1. Lắng nghe thay đổi theme từ hệ điều hành khi ở chế độ 'system'
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
 
-  // 2. Cập nhật DOM và meta theme-color mỗi khi theme thay đổi
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleOSChange = (event: MediaQueryListEvent) => {
+      setSystemIsDark(event.matches);
+    };
+
+    mediaQuery.addEventListener('change', handleOSChange);
+    return () => {
+      mediaQuery.removeEventListener('change', handleOSChange);
+    };
+  }, []);
+
+  // 2. Tính toán theme thực tế (resolved theme)
+  const isDark = themePreference === 'system' ? systemIsDark : themePreference === 'dark';
+  const resolvedTheme: ThemeMode = isDark ? 'dark' : 'light';
+
+  // 3. Đồng bộ class DOM trên <html> và meta theme-color
   useEffect(() => {
     if (typeof document === 'undefined') return;
 
     const root = document.documentElement;
-    const isDarkMode = theme === 'dark';
 
-    // Cập nhật class "dark" trên thẻ <html> để Tailwind kích hoạt dark mode
-    if (isDarkMode) {
+    if (isDark) {
       root.classList.add('dark');
     } else {
       root.classList.remove('dark');
     }
 
-    // Cập nhật động nội dung các thẻ meta theme-color
     const themeColorMetas = document.querySelectorAll('meta[name="theme-color"]');
-    const targetColor = isDarkMode ? DARK_THEME_COLOR : LIGHT_THEME_COLOR;
+    const targetColor = isDark ? DARK_THEME_COLOR : LIGHT_THEME_COLOR;
 
     if (themeColorMetas.length > 0) {
       themeColorMetas.forEach((meta) => {
@@ -82,38 +92,23 @@ export function useTheme(): UseThemeReturn {
       meta.content = targetColor;
       document.head.appendChild(meta);
     }
-  }, [theme]);
+  }, [isDark]);
 
-  // 3. Lắng nghe thay đổi theme từ hệ điều hành (chỉ kích hoạt nếu chưa toggle tay)
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.matchMedia) return;
-
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-
-    const handleOSThemeChange = (event: MediaQueryListEvent) => {
-      // Chỉ tự động đổi nếu người dùng chưa từng bấm nút toggle trong phiên này
-      if (!hasManualOverride) {
-        setTheme(event.matches ? 'dark' : 'light');
-      }
-    };
-
-    mediaQuery.addEventListener('change', handleOSThemeChange);
-    return () => {
-      mediaQuery.removeEventListener('change', handleOSThemeChange);
-    };
-  }, [hasManualOverride]);
-
-  // 4. Hàm toggle thủ công
+  // 4. Hàm toggle nhanh qua lại
   const toggleTheme = useCallback(() => {
-    setHasManualOverride(true);
-    setTheme((prevTheme) => (prevTheme === 'dark' ? 'light' : 'dark'));
-  }, []);
+    if (themePreference === 'system') {
+      setThemePreference(systemIsDark ? 'light' : 'dark');
+    } else {
+      setThemePreference(themePreference === 'dark' ? 'light' : 'dark');
+    }
+  }, [themePreference, systemIsDark, setThemePreference]);
 
   return {
-    theme,
-    isDark: theme === 'dark',
+    theme: resolvedTheme,
+    themePreference,
+    isDark,
     toggleTheme,
-    hasManualOverride,
+    setTheme: setThemePreference,
   };
 }
 
