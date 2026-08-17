@@ -5,7 +5,7 @@ export interface AppConfig {
 }
 
 export const APP_CONFIG: AppConfig = {
-  name: 'Web Game Hub',
-  version: '0.1.0',
-  description: 'Nền tảng Web Game Hub đa trò chơi',
+  name: 'PlayFusion',
+  version: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.5.0',
+  description: 'Nền tảng Web Game Hub chơi cờ và board games đối kháng trực tuyến & offline',
 };

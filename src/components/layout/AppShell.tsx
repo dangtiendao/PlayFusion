@@ -1,5 +1,6 @@
 import { type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
+import { useOnlineStatus } from '@/core/useOnlineStatus';
 
 /**
  * Interface định nghĩa một mục trên thanh điều hướng.
@@ -49,6 +50,10 @@ export interface AppShellProps {
  * 4. CÔ LẬP VÙNG CUỘN (Single Scroll Container):
  *    - html, body, #root bị khóa cuộn.
  *    - DUY NHẤT thẻ `<main>` được cuộn (`overflow-y: auto`, `overscroll-contain`).
+ *
+ * 5. TRẠNG THÁI OFFLINE (P0.5b):
+ *    - Khi mất kết nối internet, hiển thị banner thông báo nhẹ nhàng (non-blocking).
+ *    - Các game offline (Pass & Play, chơi với AI ở Phase P1.x) vẫn chơi bình thường.
  * ==============================================================================
  */
 export function AppShell({
@@ -59,6 +64,7 @@ export function AppShell({
   headerAction,
 }: AppShellProps) {
   const location = useLocation();
+  const isOnline = useOnlineStatus();
 
   // Xác định trang hiện tại để hiển thị tên trên Header
   const currentNav = navItems.find((item) => item.path === location.pathname);
@@ -125,7 +131,7 @@ export function AppShell({
 
       {/* 
         ========================================================================
-        2. CỘT NỘI DUNG CHÍNH (GỒM HEADER, MAIN CUỘN, VÀ MOBILE BOTTOMNAV)
+        2. CỘT NỘI DUNG CHÍNH (GỒM HEADER, OFFLINE BANNER, MAIN, VÀ BOTTOMNAV)
         ========================================================================
       */}
       <div className="flex flex-col flex-1 min-w-0 h-full overflow-hidden">
@@ -156,7 +162,21 @@ export function AppShell({
         </header>
 
         {/* 
-          B. VÙNG MAIN (VÙNG CUỘN DUY NHẤT TRONG TOÀN BỘ ỨNG DỤNG)
+          B. OFFLINE BANNER (THÔNG BÁO KHI MẤT MẠNG - KHÔNG CHẶN THAO TÁC)
+        */}
+        {!isOnline && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="flex-none flex items-center justify-center gap-2 px-4 py-2 bg-amber-500/15 dark:bg-amber-950/60 border-b border-amber-300/40 dark:border-amber-700/50 text-amber-800 dark:text-amber-200 text-xs font-medium text-center transition-all animate-fadeIn"
+          >
+            <span className="flex-none text-sm">⚡</span>
+            <span>Bạn đang ở chế độ Offline — Các game offline vẫn có thể chơi bình thường.</span>
+          </div>
+        )}
+
+        {/* 
+          C. VÙNG MAIN (VÙNG CUỘN DUY NHẤT TRONG TOÀN BỘ ỨNG DỤNG)
           - flex-1 overflow-y-auto: Cuộn nội dung mượt mà
           - overscroll-contain: Chặn bounce giật toàn trang
           - pl-safe & pr-safe: Bảo vệ nội dung khi xoay ngang (Landscape)
@@ -170,7 +190,7 @@ export function AppShell({
         </main>
 
         {/* 
-          C. MOBILE BOTTOM NAVIGATION (HIỂN THỊ DƯỚI BREAKPOINT MD - < 768px)
+          D. MOBILE BOTTOM NAVIGATION (HIỂN THỊ DƯỚI BREAKPOINT MD - < 768px)
           - pb-safe: Padding thêm safe-area-inset-bottom cho thanh Home Bar của iPhone
           - Ẩn trên desktop (md:hidden)
           - Vùng chạm mỗi nút tối thiểu 44x44px

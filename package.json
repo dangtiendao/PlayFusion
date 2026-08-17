@@ -1,7 +1,7 @@
 {
   "name": "playfusion",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.5.0",
   "type": "module",
   "engines": {
     "node": ">=20.0.0"
@@ -54,10 +54,12 @@
     "lint-staged": "^15.2.10",
     "postcss": "^8.4.49",
     "prettier": "^3.3.3",
+    "sharp": "^0.35.3",
     "tailwindcss": "^3.4.17",
     "typescript": "~5.6.2",
     "typescript-eslint": "^8.13.0",
     "vite": "^6.0.0",
+    "vite-plugin-pwa": "^1.3.0",
     "vitest": "^3.0.5"
   }
 }

@@ -4,6 +4,7 @@ import { APP_ROUTES } from '@/routes';
 import { AppShell } from '@/components/layout/AppShell';
 import { useTheme } from '@/core/useTheme';
 import { SunIcon, MoonIcon } from '@/components/icons/NavIcons';
+import { UpdatePrompt } from '@/components/pwa/UpdatePrompt';
 
 /**
  * AppContent Component - Render bên trong BrowserRouter để sử dụng Router hooks.
@@ -39,6 +40,8 @@ function AppContent() {
           <Route key={route.path} path={route.path} element={route.element} />
         ))}
       </Routes>
+      {/* Toast thông báo cập nhật phiên bản mới của PWA */}
+      <UpdatePrompt />
     </AppShell>
   );
 }

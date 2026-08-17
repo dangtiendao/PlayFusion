@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="maskGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1b4b" />
+      <stop offset="50%" stop-color="#2563eb" />
+      <stop offset="100%" stop-color="#0284c7" />
+    </linearGradient>
+    <linearGradient id="glowGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#60a5fa" stop-opacity="0.8" />
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.2" />
+    </linearGradient>
+  </defs>
+
+  <!-- Solid Background for Maskable Icon (Edge-to-Edge) -->
+  <rect width="512" height="512" fill="#0f172a" />
+
+  <!-- Centered Safe Zone Badge (Scale ~76% within 512x512) -->
+  <g transform="translate(61.44, 61.44) scale(0.76)">
+    <!-- Badge Background -->
+    <rect width="512" height="512" rx="112" fill="url(#maskGrad)" />
+
+    <!-- Outer Shield / Hexagon Frame -->
+    <polygon
+      points="256,56 424,144 424,368 256,456 88,368 88,144"
+      fill="none"
+      stroke="url(#glowGrad2)"
+      stroke-width="12"
+      stroke-linejoin="round"
+    />
+
+    <!-- Inner Badge Frame -->
+    <polygon
+      points="256,84 396,158 396,354 256,428 116,354 116,158"
+      fill="#0f172a"
+      fill-opacity="0.55"
+      stroke="#3b82f6"
+      stroke-width="4"
+      stroke-linejoin="round"
+    />
+
+    <!-- Monogram PF -->
+    <!-- Letter P -->
+    <path
+      d="M168 184 H240 C268 184, 288 200, 288 228 C288 256, 268 272, 240 272 H208 V336 H168 Z M208 220 V236 H236 C248 236, 254 232, 254 228 C254 224, 248 220, 236 220 Z"
+      fill="#ffffff"
+    />
+    <!-- Letter F -->
+    <path
+      d="M280 184 H352 V220 H316 V244 H344 V276 H316 V336 H280 Z"
+      fill="#38bdf8"
+    />
+
+    <!-- Game Accent -->
+    <g fill="#60a5fa" opacity="0.9">
+      <circle cx="256" cy="374" r="7" />
+      <circle cx="236" cy="374" r="5" />
+      <circle cx="276" cy="374" r="5" />
+    </g>
+  </g>
+</svg>

@@ -6,7 +6,7 @@ import eslintConfigPrettier from 'eslint-config-prettier';
 
 export default tseslint.config(
   {
-    ignores: ['dist', 'coverage', 'node_modules', '.system_generated', '.husky'],
+    ignores: ['dist', 'coverage', 'node_modules', '.system_generated', '.husky', 'dev-dist'],
   },
   js.configs.recommended,
   ...tseslint.configs.strict,
@@ -31,6 +31,16 @@ export default tseslint.config(
         require: 'readonly',
         __dirname: 'readonly',
         __filename: 'readonly',
+      },
+    },
+  },
+  {
+    files: ['scripts/**/*.js', 'scripts/**/*.mjs'],
+    languageOptions: {
+      sourceType: 'module',
+      globals: {
+        console: 'readonly',
+        process: 'readonly',
       },
     },
   },

@@ -3,8 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="alternate icon" href="/favicon.ico" type="image/x-icon" />
+
     <!--
-      Meta Viewport tối ưu Mobile-First:
+      Thẻ Icon & Cấu hình iOS PWA (Apple Web App):
+      - apple-touch-icon: Cung cấp icon chuẩn 180x180 khi người dùng iOS thêm vào Màn hình chính.
+      - apple-mobile-web-app-capable: Kích hoạt chế độ chạy toàn màn hình (Standalone) không có thanh URL Safari.
+      - apple-mobile-web-app-status-bar-style: 'black-translucent' kết hợp với 'viewport-fit=cover'
+        cho phép nền Header của AppShell tràn lên đỉnh màn hình và chữ thanh trạng thái đổi màu tinh tế.
+      - apple-mobile-web-app-title: Tên ứng dụng hiển thị dưới icon trên màn hình chính iPhone.
+    -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="PlayFusion" />
+
+    <!--
+      Meta Viewport tối ưu Mobile-First & PWA:
       - width=device-width, initial-scale=1.0: Đảm bảo tỷ lệ hiển thị chuẩn theo màn hình thiết bị.
       - maximum-scale=1.0, user-scalable=no: Ngăn ngừa phóng to bất thường khi nhấn đúp vào nút game trên thiết bị cảm ứng.
       - viewport-fit=cover: BẮT BUỘC để mở rộng web tràn viền màn hình (Edge-to-Edge), kích hoạt các biến env(safe-area-inset-*) trên iPhone có tai thỏ / Dynamic Island.
@@ -14,6 +29,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content"
     />
+
     <!--
       Theme Color cho thanh trạng thái (Status Bar) của trình duyệt theo chế độ Sáng / Tối:
     -->
