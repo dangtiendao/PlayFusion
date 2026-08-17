@@ -112,19 +112,112 @@ export const caroEngine: Engine<CaroState, CaroMove> = {
   },
 
   /**
-   * Liệt kê danh sách các nước đi hợp lệ.
-   * Lưu ý kiến trúc: Sẽ được hoàn thiện tại Phase P1.1b.
+   * Liệt kê danh sách tất cả các nước đi hợp lệ của một người chơi tại trạng thái hiện tại.
+   *
+   * QUY TẮC & HỢP ĐỒNG:
+   * 1. Nếu `playerIndex !== state.currentPlayer`: Trả về mảng rỗng `[]` để UI/AI biết và disable tương tác.
+   *    (Việc ném lỗi `WRONG_TURN` khi cố tình thực hiện nước đi sai lượt thuộc trách nhiệm của `applyMove`).
+   * 2. Nếu là lượt của người chơi: Trả về danh sách tất cả các chỉ số ô còn trống (`-1`) theo thứ tự tăng dần (deterministic).
+   *
+   * GHI CHÚ HIỆU NĂNG:
+   * Bàn 15x15 = 225 ô; việc cấp phát mảng mới mỗi lần gọi chỉ tốn <1 microsecond.
+   * Thuật toán AI tại Phase P1.2 sẽ triển khai Heuristic thu hẹp vùng lân cận riêng biệt trong cây tìm kiếm,
+   * tuyệt đối không tối ưu sớm làm phức tạp hóa hàm core engine này.
+   *
+   * @param state Trạng thái bàn cờ hiện tại.
+   * @param playerIndex Chỉ số ghế người chơi (0 hoặc 1).
+   * @returns Mảng các index phẳng ô cờ có thể đánh (0..totalCells - 1).
    */
-  legalMoves(): CaroMove[] {
-    throw new EngineError('INVALID_STATE', 'Chưa triển khai — P1.1b');
+  legalMoves(state: CaroState, playerIndex: PlayerIndex): CaroMove[] {
+    // 1. Chỉ người chơi đang đến lượt mới có danh sách nước đi hợp lệ
+    if (playerIndex !== state.currentPlayer) {
+      return [];
+    }
+
+    // 2. Kiểm tra nếu bàn cờ đã đầy (Game Over tạm thời trước P1.1c)
+    const totalCells = state.options.boardSize * state.options.boardSize;
+    if (state.moveCount >= totalCells) {
+      return [];
+    }
+
+    // 3. Gom các ô trống (-1) theo thứ tự index tăng dần
+    const moves: CaroMove[] = [];
+    for (let i = 0; i < state.board.length; i++) {
+      if (state.board[i] === -1) {
+        moves.push(i);
+      }
+    }
+
+    return moves;
   },
 
   /**
-   * Thực hiện nước đi và trả về trạng thái bàn cờ mới (Immutable).
-   * Lưu ý kiến trúc: Sẽ được hoàn thiện tại Phase P1.1b.
+   * Áp dụng nước đi và sinh ra trạng thái bàn cờ mới (Hàm thuần túy - Pure Function & Immutable).
+   *
+   * THỨ TỰ KIỂM ĐỊNH & MÃ LỖI ENGINEERROR CHUẨN HÓA (Được Server Edge Function P3.2 ánh xạ sang HTTP Status):
+   * 1. 'GAME_OVER': Ván cờ đã kết thúc (P1.1b: Bàn cờ đã đầy ô; P1.1c: Sẽ tích hợp `isTerminal(state).over`).
+   * 2. 'WRONG_TURN': Người chơi thực hiện nước đi không đúng lượt (`playerIndex !== state.currentPlayer`).
+   * 3. 'ILLEGAL_MOVE': Vị trí nước đi nằm ngoài phạm vi bàn cờ (`move < 0` hoặc `move >= totalCells` hoặc không phải số nguyên).
+   * 4. 'ILLEGAL_MOVE': Ô cờ tại vị trí `move` đã có quân cờ trước đó (`state.board[move] !== -1`).
+   *
+   * @param state Trạng thái bàn cờ trước nước đi.
+   * @param move Vị trí ô cờ muốn đánh (flat index).
+   * @param playerIndex Chỉ số ghế người chơi thực hiện nước đi.
+   * @returns Đối tượng CaroState MỚI đã cập nhật quân cờ, đổi lượt, tăng moveCount, và cập nhật lastMove.
+   * @throws {EngineError} Với mã lỗi tương ứng theo thứ tự chuẩn hóa trên.
    */
-  applyMove(): CaroState {
-    throw new EngineError('INVALID_STATE', 'Chưa triển khai — P1.1b');
+  applyMove(state: CaroState, move: CaroMove, playerIndex: PlayerIndex): CaroState {
+    const totalCells = state.options.boardSize * state.options.boardSize;
+
+    // 1. Kiểm tra trạng thái ván cờ đã kết thúc (GAME_OVER)
+    // GHI NỢ KỸ THUẬT: P1.1b kiểm tra tạm thời điều kiện bàn cờ đầy.
+    // Tại Phase P1.1c, điều kiện này sẽ được thay bằng: if (this.isTerminal(state).over)
+    if (state.moveCount >= totalCells || !state.board.includes(-1)) {
+      throw new EngineError(
+        'GAME_OVER',
+        'Không thể thực hiện nước đi khi bàn cờ đã đầy / ván đấu đã kết thúc.',
+      );
+    }
+
+    // 2. Kiểm tra đúng lượt người chơi (WRONG_TURN)
+    if (playerIndex !== state.currentPlayer) {
+      throw new EngineError(
+        'WRONG_TURN',
+        `Sai lượt: Lượt hiện tại là người chơi ${state.currentPlayer}, nhưng nhận được nước đi từ người chơi ${playerIndex}.`,
+      );
+    }
+
+    // 3. Kiểm tra tính hợp lệ của tọa độ nước đi (ILLEGAL_MOVE - Out of Bounds)
+    if (typeof move !== 'number' || !Number.isInteger(move) || move < 0 || move >= totalCells) {
+      throw new EngineError(
+        'ILLEGAL_MOVE',
+        `Nước đi không hợp lệ: Vị trí ${move} nằm ngoài phạm vi bàn cờ (0..${totalCells - 1}).`,
+      );
+    }
+
+    // 4. Kiểm tra ô cờ đã có quân hay chưa (ILLEGAL_MOVE - Cell Occupied)
+    const currentCell = state.board[move];
+    if (currentCell !== -1) {
+      throw new EngineError(
+        'ILLEGAL_MOVE',
+        `Nước đi không hợp lệ: Ô cờ tại vị trí ${move} đã có quân cờ (${currentCell === 0 ? 'X' : 'O'}).`,
+      );
+    }
+
+    // 5. Tạo bản sao bàn cờ mới và đặt quân (Immutable)
+    const nextBoard = [...state.board];
+    nextBoard[move] = playerIndex;
+
+    // 6. Chuyển lượt sang đối thủ (0 -> 1 hoặc 1 -> 0)
+    const nextPlayer: PlayerIndex = state.currentPlayer === 0 ? 1 : 0;
+
+    return {
+      board: nextBoard,
+      currentPlayer: nextPlayer,
+      moveCount: state.moveCount + 1,
+      lastMove: move,
+      options: state.options,
+    };
   },
 
   /**
