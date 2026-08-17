@@ -1,34 +1,79 @@
-import { useState, useMemo } from 'react';
-import { dummyEngine, type DummyState } from '@engines/dummy/engine';
-import { dummyManifest } from '@engines/dummy/manifest';
+import { useState, useEffect, useMemo } from 'react';
+import type { GameViewProps } from '../types';
+import type { Engine } from '@engines/types';
 import { validateGameDefinition, EngineError } from '@engines/types';
+import type { DummyState, DummyMove } from '@engines/dummy/engine';
 
-export function DummyEngineDemo() {
-  const [gameState, setGameState] = useState<DummyState>(() =>
-    dummyEngine.init({ playerCount: 2, options: { maxTurns: 6 } }),
-  );
-  const [lastActionLog, setLastActionLog] = useState<string>(
-    'Trò chơi khởi tạo sẵn sàng qua Engine.init()',
-  );
+/**
+ * ==============================================================================
+ * DUMMY GAME VIEW (VIEW MẪU THAM CHIẾU CHO CÁC GAME THẬT)
+ * ==============================================================================
+ *
+ * GHI CHÚ KIẾN TRÚC:
+ * 1. View này là khuôn mẫu tham chiếu chuẩn mực — các game thật từ Phase P1.x (Caro P1.1)
+ *    sẽ copy cấu trúc tổ chức từ file này.
+ * 2. Nạp engine thông qua `definition.loadEngine()` bất đồng bộ nhằm kiểm chứng tính năng
+ *    code-splitting dynamic import của Vite.
+ * ==============================================================================
+ */
+export default function DummyGameView({ definition }: GameViewProps) {
+  const [engine, setEngine] = useState<Engine<DummyState, DummyMove> | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Kiểm chứng hàm validateGameDefinition chạy trực tiếp phía Client UI
-  const manifestValidationErrors = useMemo(() => validateGameDefinition(dummyManifest), []);
+  const [gameState, setGameState] = useState<DummyState | null>(null);
+  const [lastActionLog, setLastActionLog] = useState<string>('Đang khởi tạo Engine...');
 
-  const terminalResult = useMemo(() => dummyEngine.isTerminal(gameState), [gameState]);
+  // 1. Tải Engine động qua definition.loadEngine()
+  useEffect(() => {
+    let isMounted = true;
+    setLoading(true);
 
-  const legalMoves = useMemo(
-    () => dummyEngine.legalMoves(gameState, gameState.currentPlayer),
-    [gameState],
-  );
+    definition
+      .loadEngine()
+      .then((loadedEngine) => {
+        if (isMounted) {
+          const typedEngine = loadedEngine as unknown as Engine<DummyState, DummyMove>;
+          setEngine(typedEngine);
+          const initial = typedEngine.init({ playerCount: 2, options: { maxTurns: 6 } });
+          setGameState(initial);
+          setLastActionLog('Engine đã nạp động thành công qua definition.loadEngine()');
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (isMounted) {
+          setLoadError(err instanceof Error ? err.message : 'Không thể tải Engine');
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [definition]);
+
+  // 2. Kiểm chứng manifest fail-fast
+  const manifestValidationErrors = useMemo(() => validateGameDefinition(definition), [definition]);
+
+  const terminalResult = useMemo(() => {
+    if (!engine || !gameState) return { over: false };
+    return engine.isTerminal(gameState);
+  }, [engine, gameState]);
+
+  const legalMoves = useMemo(() => {
+    if (!engine || !gameState) return [];
+    return engine.legalMoves(gameState, gameState.currentPlayer);
+  }, [engine, gameState]);
 
   const handlePlayMove = (points: number): void => {
-    if (terminalResult.over) {
+    if (!engine || !gameState || terminalResult.over) {
       return;
     }
 
     try {
       const activePlayer = gameState.currentPlayer;
-      const nextState = dummyEngine.applyMove(
+      const nextState = engine.applyMove(
         gameState,
         { playerIndex: activePlayer, points },
         activePlayer,
@@ -47,9 +92,31 @@ export function DummyEngineDemo() {
   };
 
   const handleReset = (): void => {
-    setGameState(dummyEngine.init({ playerCount: 2, options: { maxTurns: 6 } }));
-    setLastActionLog('Đã đặt lại trạng thái bàn cờ ban đầu qua dummyEngine.init().');
+    if (!engine) return;
+    const initial = engine.init({ playerCount: 2, options: { maxTurns: 6 } });
+    setGameState(initial);
+    setLastActionLog('Đã đặt lại trạng thái bàn cờ ban đầu qua engine.init().');
   };
+
+  if (loading) {
+    return (
+      <div className="p-8 text-center space-y-3 bg-surface dark:bg-surface-dark rounded-2xl border border-surface-border dark:border-surface-dark-border">
+        <div className="inline-block animate-spin text-2xl">⏳</div>
+        <p className="text-sm font-medium text-slate-600 dark:text-slate-400">
+          Đang nạp động mã nguồn Engine ({definition.id})...
+        </p>
+      </div>
+    );
+  }
+
+  if (loadError || !engine || !gameState) {
+    return (
+      <div className="p-6 text-center space-y-2 bg-red-50 dark:bg-red-950/40 rounded-2xl border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300">
+        <p className="font-bold">❌ Lỗi nạp Game Engine</p>
+        <p className="text-xs">{loadError || 'Không thể khởi tạo trạng thái bàn cờ.'}</p>
+      </div>
+    );
+  }
 
   const p0Outcome = terminalResult.outcomes?.[0]?.outcome;
   const p1Outcome = terminalResult.outcomes?.[1]?.outcome;
@@ -58,10 +125,10 @@ export function DummyEngineDemo() {
     <div className="bg-surface-subtle dark:bg-surface-dark-subtle border border-surface-border dark:border-surface-dark-border rounded-2xl p-5 sm:p-6 shadow-sm space-y-4 text-left">
       <div className="flex items-center justify-between border-b border-surface-border dark:border-surface-dark-border pb-3">
         <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-          <span>🎮 Kiểm chứng Engine & GameDefinition</span>
+          <span>🎮 {definition.name}</span>
         </h2>
         <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300">
-          Engine&lt;S, M&gt;
+          {definition.id}
         </span>
       </div>
 
@@ -150,5 +217,3 @@ export function DummyEngineDemo() {
     </div>
   );
 }
-
-export default DummyEngineDemo;

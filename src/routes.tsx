@@ -8,10 +8,10 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
  * CẤU HÌNH ĐIỀU HƯỚNG TẬP TRUNG (CENTRALIZED ROUTE CONFIGURATION)
  * ==============================================================================
  *
- * GHI CHÚ KIẾN TRÚC QUAN TRỌNG:
- * Phase P0.7 sẽ bổ sung route /game/:gameId render từ registry — không thêm route
- * game thật ở phase này. Toàn bộ menu game và router game sẽ được nạp động
- * từ src/core/registry.ts khi bước sang P0.7.
+ * GHI CHÚ KIẾN TRÚC:
+ * - Khai báo cấu hình toàn bộ các routes của ứng dụng PlayFusion.
+ * - Route trò chơi là route động duy nhất `/game/:gameId` (showInNav: false),
+ *   tự động nạp động các game từ `src/games/registry.ts`.
  * ==============================================================================
  */
 
@@ -28,8 +28,9 @@ export interface RouteConfig {
   readonly showInNav: boolean;
 }
 
-// Lazy load các trang bằng React.lazy để tối ưu bundle size và chuẩn bị cho code-splitting
+// Lazy load các trang bằng React.lazy để tối ưu bundle size và code-splitting
 const HomePage = lazy(() => import('@/pages/HomePage'));
+const GamePage = lazy(() => import('@/pages/GamePage'));
 const LeaderboardPage = lazy(() => import('@/pages/LeaderboardPage'));
 const ProfilePage = lazy(() => import('@/pages/ProfilePage'));
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'));
@@ -49,6 +50,16 @@ export const APP_ROUTES: readonly RouteConfig[] = [
       </Suspense>
     ),
     showInNav: true,
+  },
+  {
+    path: '/game/:gameId',
+    label: 'Ván đấu',
+    element: (
+      <Suspense fallback={<LoadingSpinner message="Đang tải trò chơi..." />}>
+        <GamePage />
+      </Suspense>
+    ),
+    showInNav: false,
   },
   {
     path: '/leaderboard',

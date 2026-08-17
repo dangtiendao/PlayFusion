@@ -1,0 +1,55 @@
+// @vitest-environment jsdom
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { render, screen, cleanup } from '@testing-library/react';
+import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { GamePage } from './GamePage';
+
+describe('GamePage Dynamic Route Tests (src/pages/GamePage.tsx)', () => {
+  beforeEach(() => {
+    cleanup();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('1. Render thành công game hợp lệ (/game/dummy)', async () => {
+    render(
+      <MemoryRouter initialEntries={['/game/dummy']}>
+        <Routes>
+          <Route path="/game/:gameId" element={<GamePage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    // Xác nhận nút Back và Header hiển thị
+    expect(screen.getByRole('link', { name: /Quay lại Sảnh trò chơi/i })).toBeDefined();
+    expect(screen.getByText('Bàn cờ')).toBeDefined();
+  });
+
+  it('2. Render thành công game giả thứ hai (/game/dummy2)', async () => {
+    render(
+      <MemoryRouter initialEntries={['/game/dummy2']}>
+        <Routes>
+          <Route path="/game/:gameId" element={<GamePage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('link', { name: /Quay lại Sảnh trò chơi/i })).toBeDefined();
+    expect(screen.getByText('Giải đố')).toBeDefined();
+  });
+
+  it('3. Hiển thị NotFoundPage khi truy cập ID game không tồn tại (/game/non_existent_game)', () => {
+    render(
+      <MemoryRouter initialEntries={['/game/non_existent_game']}>
+        <Routes>
+          <Route path="/game/:gameId" element={<GamePage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText(/404/i)).toBeDefined();
+    expect(screen.getByText(/Không tìm thấy trang/i)).toBeDefined();
+  });
+});
