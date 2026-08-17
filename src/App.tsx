@@ -1,56 +1,56 @@
-import { useState } from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { APP_CONFIG } from '@/config/app';
-import { DummyEngineDemo } from '@/components/DummyEngineDemo';
+import { APP_ROUTES } from '@/routes';
+import { AppShell } from '@/components/layout/AppShell';
+import { useTheme } from '@/core/useTheme';
+import { SunIcon, MoonIcon } from '@/components/icons/NavIcons';
 
-export function App() {
-  const [isDark, setIsDark] = useState<boolean>(() => {
-    if (typeof document !== 'undefined') {
-      return document.documentElement.classList.contains('dark');
-    }
-    return false;
-  });
+/**
+ * AppContent Component - Render bên trong BrowserRouter để sử dụng Router hooks.
+ */
+function AppContent() {
+  const { isDark, toggleTheme } = useTheme();
 
-  const toggleDarkMode = (): void => {
-    const nextState = !isDark;
-    setIsDark(nextState);
-    if (nextState) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  };
+  // Lọc các route được phép hiển thị trên thanh điều hướng
+  const navItems = APP_ROUTES.filter((route) => route.showInNav);
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 transition-colors duration-200">
-      <div className="w-full max-w-lg space-y-6">
-        {/* Header */}
-        <header className="text-center space-y-2">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-primary-50 text-primary-700 dark:bg-primary-950/50 dark:text-primary-300 border border-primary-200 dark:border-primary-800">
-            <span>Phiên bản v{APP_CONFIG.version}</span>
-          </div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-            {APP_CONFIG.name}
-          </h1>
-          <p className="text-sm sm:text-base text-slate-600 dark:text-slate-400">
-            {APP_CONFIG.description}
-          </p>
-        </header>
+    <AppShell
+      appName={APP_CONFIG.name}
+      appVersion={APP_CONFIG.version}
+      navItems={navItems}
+      headerAction={
+        <button
+          type="button"
+          onClick={toggleTheme}
+          aria-label={isDark ? 'Chuyển sang chế độ sáng' : 'Chuyển sang chế độ tối'}
+          className="min-h-[44px] min-w-[44px] px-2.5 py-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-surface-muted dark:hover:bg-surface-dark-muted border border-surface-border dark:border-surface-dark-border transition-colors text-sm flex items-center justify-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500"
+        >
+          {isDark ? (
+            <SunIcon className="w-5 h-5 text-amber-500" />
+          ) : (
+            <MoonIcon className="w-5 h-5 text-slate-700" />
+          )}
+        </button>
+      }
+    >
+      <Routes>
+        {APP_ROUTES.map((route) => (
+          <Route key={route.path} path={route.path} element={route.element} />
+        ))}
+      </Routes>
+    </AppShell>
+  );
+}
 
-        {/* Dummy Engine Integration Verification Component */}
-        <DummyEngineDemo />
-
-        {/* Theme Settings & Toggle */}
-        <div className="text-center pt-2">
-          <button
-            type="button"
-            onClick={toggleDarkMode}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-surface-border dark:border-surface-dark-border bg-surface dark:bg-surface-dark hover:bg-surface-muted dark:hover:bg-surface-dark-muted text-slate-700 dark:text-slate-200 transition-colors shadow-sm"
-          >
-            {isDark ? '☀️ Chuyển sang Light Mode' : '🌙 Chuyển sang Dark Mode'}
-          </button>
-        </div>
-      </div>
-    </div>
+/**
+ * App Root Component bọc BrowserRouter cho toàn bộ ứng dụng.
+ */
+export function App() {
+  return (
+    <BrowserRouter>
+      <AppContent />
+    </BrowserRouter>
   );
 }
 

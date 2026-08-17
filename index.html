@@ -3,10 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!--
+      Meta Viewport tối ưu Mobile-First:
+      - width=device-width, initial-scale=1.0: Đảm bảo tỷ lệ hiển thị chuẩn theo màn hình thiết bị.
+      - maximum-scale=1.0, user-scalable=no: Ngăn ngừa phóng to bất thường khi nhấn đúp vào nút game trên thiết bị cảm ứng.
+      - viewport-fit=cover: BẮT BUỘC để mở rộng web tràn viền màn hình (Edge-to-Edge), kích hoạt các biến env(safe-area-inset-*) trên iPhone có tai thỏ / Dynamic Island.
+      - interactive-widget=resizes-content: Hướng dẫn trình duyệt (Chrome/Android) co giãn viewport thay vì đẩy lệch layout khi bàn phím ảo xuất hiện.
+    -->
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content"
     />
+    <!--
+      Theme Color cho thanh trạng thái (Status Bar) của trình duyệt theo chế độ Sáng / Tối:
+    -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f8fafc" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f172a" />
     <title>Web Game Hub</title>
   </head>
   <body>
