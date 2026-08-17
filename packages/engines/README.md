@@ -15,7 +15,30 @@ Thư mục chứa toàn bộ logic trò chơi cốt lõi (Game Engine) viết b�
 
 ---
 
-## Lưu Ý Về Engine Dummy (`dummy/engine.ts`)
+## CHECKLIST VIẾT ENGINE MỚI (BẮT BUỘC TUÂN THỦ)
 
-- Module `packages/engines/dummy/engine.ts` hiện tại là **khuôn tham chiếu kiểm chứng hạ tầng** (phục vụ Phase P0.2c chứng minh engine chạy được cả trên Node test lẫn Client React).
-- Dummy engine **KHÔNG** phải game thật và sẽ được chuẩn hóa, thay thế bằng interface `Engine<S, M>` và `GameDefinition` chính thức tại **Phase P0.6**.
+Khi triển khai một trò chơi mới từ Phase P1.x (ví dụ: Caro, Cờ Tướng, Cờ Vua):
+
+1. **Implement Interface `Engine<S, M>`**: Export đối tượng engine tuân thủ 100% interface `Engine<S, M>` từ `@engines/types`.
+2. **State & Move chuẩn mực**:
+   - `State` và `Move` phải là Plain Object / JSON-serializable (không dùng Map, Set, Class instance có methods).
+   - Hàm `applyMove` phải là Pure Function, trả về state mới (Immutable), tuyệt đối không mutate state cũ.
+3. **Xử lý lỗi với `EngineError`**:
+   - Throw `new EngineError('WRONG_TURN', message)` khi người chơi đi sai lượt.
+   - Throw `new EngineError('ILLEGAL_MOVE', message)` khi nước đi phạm luật cờ.
+   - Throw `new EngineError('GAME_OVER', message)` khi cố gắng đi sau khi ván đã kết thúc.
+   - Throw `new EngineError('INVALID_STATE', message)` khi deserialize thất bại.
+4. **Tính toàn vẹn Round-trip**:
+   - `serialize(state)` phải nén gọn nhẹ (tiết kiệm DB quota 500MB).
+   - `deserialize(serialize(state))` bắt buộc phục hồi tương đương 100% `state` gốc.
+5. **Khai báo `manifest.ts` chuẩn `GameDefinition`**:
+   - Khai báo đầy đủ 12 trường bắt buộc (ID kebab-case, players, modes, turnBased, ranked, scoring, ratingSystem...).
+   - Bắt buộc vượt qua `validateGameDefinition(manifest)` với 0 lỗi (kiểm tra bằng unit test).
+6. **Bộ Unit Tests bắt buộc**:
+   - Test khởi tạo `init`.
+   - Test `legalMoves`.
+   - Test tính bất biến (Immutability).
+   - Test ném đúng các mã `EngineError`.
+   - Test nhận diện kết thúc `isTerminal`.
+   - Test round-trip `serialize` $\leftrightarrow$ `deserialize`.
+   - File type-test `expectTypeOf(engine).toMatchTypeOf<Engine<S, M>>()`.

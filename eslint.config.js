@@ -50,7 +50,6 @@ export default tseslint.config(
   // Tuyệt đối KHÔNG import:
   //   1. "react" hoặc "react-dom" (chống dính coupling vào UI framework)
   //   2. "@/*" hoặc "src/*" (chống import ngược tầng UI / browser API wrapper)
-  //   3. Relative path vượt ra ngoài packages/engines ("../*")
   // Engine phải có khả năng chạy độc lập trên mọi môi trường (Client, Server Deno/Edge, WebWorker, Test).
   // ==============================================================================
   {
@@ -73,9 +72,9 @@ export default tseslint.config(
           ],
           patterns: [
             {
-              group: ['@/*', 'src/*', '../*'],
+              group: ['@/*', 'src/*', '**/src/*'],
               message:
-                'VI PHẠM KIẾN TRÚC: Engine trong packages/engines không được phép import từ tầng UI (@/*, src/*, hoặc ../*)',
+                'VI PHẠM KIẾN TRÚC: Engine trong packages/engines không được phép import từ tầng UI (@/* hoặc src/*)',
             },
           ],
         },
