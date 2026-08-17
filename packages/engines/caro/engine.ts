@@ -2,6 +2,7 @@ import type { Engine, EngineInitConfig, PlayerIndex, TerminalResult } from '../t
 import { EngineError } from '../types';
 import type { CaroMove, CaroOptions, CaroState } from './types';
 import { DEFAULT_CARO_OPTIONS } from './types';
+import { checkWinAt, checkWinFullScan } from './win-check';
 
 /**
  * ==============================================================================
@@ -115,14 +116,12 @@ export const caroEngine: Engine<CaroState, CaroMove> = {
    * Liệt kê danh sách tất cả các nước đi hợp lệ của một người chơi tại trạng thái hiện tại.
    *
    * QUY TẮC & HỢP ĐỒNG:
-   * 1. Nếu `playerIndex !== state.currentPlayer`: Trả về mảng rỗng `[]` để UI/AI biết và disable tương tác.
-   *    (Việc ném lỗi `WRONG_TURN` khi cố tình thực hiện nước đi sai lượt thuộc trách nhiệm của `applyMove`).
-   * 2. Nếu là lượt của người chơi: Trả về danh sách tất cả các chỉ số ô còn trống (`-1`) theo thứ tự tăng dần (deterministic).
+   * 1. Nếu `playerIndex !== state.currentPlayer` hoặc trận đấu đã kết thúc: Trả về mảng rỗng `[]`.
+   * 2. Nếu là lượt của người chơi và trận đấu đang diễn ra: Trả về danh sách tất cả các chỉ số ô còn trống (`-1`) theo thứ tự tăng dần (deterministic).
    *
    * GHI CHÚ HIỆU NĂNG:
    * Bàn 15x15 = 225 ô; việc cấp phát mảng mới mỗi lần gọi chỉ tốn <1 microsecond.
-   * Thuật toán AI tại Phase P1.2 sẽ triển khai Heuristic thu hẹp vùng lân cận riêng biệt trong cây tìm kiếm,
-   * tuyệt đối không tối ưu sớm làm phức tạp hóa hàm core engine này.
+   * Thuật toán AI tại Phase P1.2 sẽ triển khai Heuristic thu hẹp vùng lân cận riêng biệt trong cây tìm kiếm.
    *
    * @param state Trạng thái bàn cờ hiện tại.
    * @param playerIndex Chỉ số ghế người chơi (0 hoặc 1).
@@ -134,9 +133,8 @@ export const caroEngine: Engine<CaroState, CaroMove> = {
       return [];
     }
 
-    // 2. Kiểm tra nếu bàn cờ đã đầy (Game Over tạm thời trước P1.1c)
-    const totalCells = state.options.boardSize * state.options.boardSize;
-    if (state.moveCount >= totalCells) {
+    // 2. Nếu ván đấu đã kết thúc -> không còn nước đi hợp lệ
+    if (this.isTerminal(state).over) {
       return [];
     }
 
@@ -155,7 +153,7 @@ export const caroEngine: Engine<CaroState, CaroMove> = {
    * Áp dụng nước đi và sinh ra trạng thái bàn cờ mới (Hàm thuần túy - Pure Function & Immutable).
    *
    * THỨ TỰ KIỂM ĐỊNH & MÃ LỖI ENGINEERROR CHUẨN HÓA (Được Server Edge Function P3.2 ánh xạ sang HTTP Status):
-   * 1. 'GAME_OVER': Ván cờ đã kết thúc (P1.1b: Bàn cờ đã đầy ô; P1.1c: Sẽ tích hợp `isTerminal(state).over`).
+   * 1. 'GAME_OVER': Ván cờ đã kết thúc (`isTerminal(state).over === true`).
    * 2. 'WRONG_TURN': Người chơi thực hiện nước đi không đúng lượt (`playerIndex !== state.currentPlayer`).
    * 3. 'ILLEGAL_MOVE': Vị trí nước đi nằm ngoài phạm vi bàn cờ (`move < 0` hoặc `move >= totalCells` hoặc không phải số nguyên).
    * 4. 'ILLEGAL_MOVE': Ô cờ tại vị trí `move` đã có quân cờ trước đó (`state.board[move] !== -1`).
@@ -170,13 +168,8 @@ export const caroEngine: Engine<CaroState, CaroMove> = {
     const totalCells = state.options.boardSize * state.options.boardSize;
 
     // 1. Kiểm tra trạng thái ván cờ đã kết thúc (GAME_OVER)
-    // GHI NỢ KỸ THUẬT: P1.1b kiểm tra tạm thời điều kiện bàn cờ đầy.
-    // Tại Phase P1.1c, điều kiện này sẽ được thay bằng: if (this.isTerminal(state).over)
-    if (state.moveCount >= totalCells || !state.board.includes(-1)) {
-      throw new EngineError(
-        'GAME_OVER',
-        'Không thể thực hiện nước đi khi bàn cờ đã đầy / ván đấu đã kết thúc.',
-      );
+    if (this.isTerminal(state).over) {
+      throw new EngineError('GAME_OVER', 'Không thể thực hiện nước đi khi ván đấu đã kết thúc.');
     }
 
     // 2. Kiểm tra đúng lượt người chơi (WRONG_TURN)
@@ -221,11 +214,49 @@ export const caroEngine: Engine<CaroState, CaroMove> = {
   },
 
   /**
-   * Kiểm tra ván cờ đã kết thúc hay chưa và tính toán kết quả chi tiết.
-   * Lưu ý kiến trúc: Sẽ được hoàn thiện tại Phase P1.1c.
+   * Kiểm tra xem ván cờ đã kết thúc hay chưa và tính toán kết quả chi tiết.
+   *
+   * TỐI ƯU HÓA:
+   * - Nếu `state.lastMove !== null`: Quét 4 hướng xung quanh `lastMove` (O(1)).
+   * - Nếu `state.lastMove === null`: Quét toàn bàn (O(size^2)).
+   *
+   * @param state Trạng thái bàn cờ hiện tại.
+   * @returns Kết quả TerminalResult (over: boolean, outcomes?: PlayerOutcome[]).
    */
-  isTerminal(): TerminalResult {
-    throw new EngineError('INVALID_STATE', 'Chưa triển khai — P1.1c');
+  isTerminal(state: CaroState): TerminalResult {
+    const { board, lastMove, options, moveCount } = state;
+    const totalCells = options.boardSize * options.boardSize;
+
+    // 1. Kiểm tra thắng cuộc (Tối ưu qua lastMove nếu có)
+    const win =
+      lastMove !== null
+        ? checkWinAt(board, options.boardSize, lastMove, options)
+        : checkWinFullScan(board, options.boardSize, options);
+
+    if (win !== null) {
+      const loser: PlayerIndex = win.winner === 0 ? 1 : 0;
+      return {
+        over: true,
+        outcomes: [
+          { playerIndex: win.winner, outcome: 'win' },
+          { playerIndex: loser, outcome: 'loss' },
+        ],
+      };
+    }
+
+    // 2. Kiểm tra hòa cờ khi bàn cờ đã đầy ô mà không có ai thắng
+    if (moveCount >= totalCells || !board.includes(-1)) {
+      return {
+        over: true,
+        outcomes: [
+          { playerIndex: 0, outcome: 'draw' },
+          { playerIndex: 1, outcome: 'draw' },
+        ],
+      };
+    }
+
+    // 3. Trận đấu vẫn đang diễn ra
+    return { over: false };
   },
 
   /**

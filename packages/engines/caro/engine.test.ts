@@ -233,17 +233,31 @@ describe('Caro Game Engine (P1.1a & P1.1b)', () => {
       expect(() => caroEngine.applyMove(state, NaN, 0)).toThrowError(EngineError);
     });
 
-    it('ném lỗi ILLEGAL_MOVE khi đánh vào ô cờ đã có quân', () => {
+    it('ném lỗi ILLEGAL_MOVE khi đánh vào ô cờ đã có quân (quân X hoặc quân O)', () => {
       let state = caroEngine.init({ playerCount: 2 });
-      state = caroEngine.applyMove(state, 112, 0); // Player 0 đánh vào 112
+      state = caroEngine.applyMove(state, 112, 0); // Player 0 đánh vào 112 (X)
 
-      // Player 1 cố tình đánh lại vào 112
+      // Player 1 cố tình đánh lại vào 112 (ô có X)
       expect(() => caroEngine.applyMove(state, 112, 1)).toThrowError(EngineError);
       try {
         caroEngine.applyMove(state, 112, 1);
       } catch (err) {
         expect(err).toBeInstanceOf(EngineError);
         expect((err as EngineError).code).toBe('ILLEGAL_MOVE');
+        expect((err as EngineError).message).toContain('X');
+      }
+
+      // Player 1 đánh vào 113 (O)
+      state = caroEngine.applyMove(state, 113, 1);
+
+      // Player 0 cố tình đánh vào 113 (ô có O)
+      expect(() => caroEngine.applyMove(state, 113, 0)).toThrowError(EngineError);
+      try {
+        caroEngine.applyMove(state, 113, 0);
+      } catch (err) {
+        expect(err).toBeInstanceOf(EngineError);
+        expect((err as EngineError).code).toBe('ILLEGAL_MOVE');
+        expect((err as EngineError).message).toContain('O');
       }
     });
 
@@ -276,7 +290,18 @@ describe('Caro Game Engine (P1.1a & P1.1b)', () => {
   describe('Chuỗi Tích Hợp & Determinism (P1.1b)', () => {
     it('chuỗi tích hợp: đi 10 nước -> serialize -> deserialize -> đi tiếp nước thứ 11 thành công', () => {
       let state = caroEngine.init({ playerCount: 2 });
-      const moves = [112, 113, 127, 128, 97, 98, 82, 83, 67, 68];
+      const moves = [
+        idx(0, 0, 15),
+        idx(0, 1, 15),
+        idx(2, 0, 15),
+        idx(2, 1, 15),
+        idx(4, 0, 15),
+        idx(4, 1, 15),
+        idx(6, 0, 15),
+        idx(6, 1, 15),
+        idx(8, 0, 15),
+        idx(8, 1, 15),
+      ];
 
       for (const [i, move] of moves.entries()) {
         const player = (i % 2) as 0 | 1;
@@ -292,12 +317,13 @@ describe('Caro Game Engine (P1.1a & P1.1b)', () => {
 
       expect(restoredState).toEqual(state);
 
-      // Đi tiếp nước thứ 11 trên restoredState (Player 0 đánh vào ô 52)
-      const nextState = caroEngine.applyMove(restoredState, 52, 0);
+      // Đi tiếp nước thứ 11 trên restoredState (Player 0 đánh vào ô (10, 0))
+      const move11 = idx(10, 0, 15);
+      const nextState = caroEngine.applyMove(restoredState, move11, 0);
       expect(nextState.moveCount).toBe(11);
       expect(nextState.currentPlayer).toBe(1);
-      expect(nextState.board[52]).toBe(0);
-      expect(nextState.lastMove).toBe(52);
+      expect(nextState.board[move11]).toBe(0);
+      expect(nextState.lastMove).toBe(move11);
     });
 
     it('tính deterministic 100%: 2 chuỗi nước đi giống nhau sinh ra serialize giống hệt nhau', () => {
@@ -317,16 +343,144 @@ describe('Caro Game Engine (P1.1a & P1.1b)', () => {
     });
   });
 
-  describe('Placeholder Methods (P1.1c)', () => {
-    it('isTerminal ném INVALID_STATE thông báo chưa triển khai', () => {
+  describe('isTerminal (P1.1c)', () => {
+    it('trả về over: false khi ván đấu mới bắt đầu hoặc đang diễn ra', () => {
       const state = caroEngine.init({ playerCount: 2 });
-      expect(() => caroEngine.isTerminal(state)).toThrowError(EngineError);
-      try {
-        caroEngine.isTerminal(state);
-      } catch (err) {
-        expect((err as EngineError).code).toBe('INVALID_STATE');
-        expect((err as EngineError).message).toContain('P1.1c');
+      expect(caroEngine.isTerminal(state)).toEqual({ over: false });
+
+      // Đánh 2 nước
+      const state2 = caroEngine.applyMove(state, 112, 0);
+      expect(caroEngine.isTerminal(state2)).toEqual({ over: false });
+    });
+
+    it('trả về over: true và outcomes chính xác khi Player 0 thắng', () => {
+      let state = caroEngine.init({ playerCount: 2 });
+      // Player 0 đánh 5 quân liên tiếp: (0,0), (1,0), (2,0), (3,0), (4,0)
+      // Player 1 đánh xen kẽ: (0,1), (1,1), (2,1), (3,1)
+      state = caroEngine.applyMove(state, idx(0, 0, 15), 0);
+      state = caroEngine.applyMove(state, idx(0, 1, 15), 1);
+      state = caroEngine.applyMove(state, idx(1, 0, 15), 0);
+      state = caroEngine.applyMove(state, idx(1, 1, 15), 1);
+      state = caroEngine.applyMove(state, idx(2, 0, 15), 0);
+      state = caroEngine.applyMove(state, idx(2, 1, 15), 1);
+      state = caroEngine.applyMove(state, idx(3, 0, 15), 0);
+      state = caroEngine.applyMove(state, idx(3, 1, 15), 1);
+      state = caroEngine.applyMove(state, idx(4, 0, 15), 0); // Nước quyết định
+
+      const terminal = caroEngine.isTerminal(state);
+      expect(terminal.over).toBe(true);
+      expect(terminal.outcomes).toEqual([
+        { playerIndex: 0, outcome: 'win' },
+        { playerIndex: 1, outcome: 'loss' },
+      ]);
+    });
+
+    it('trả về over: true và outcomes chính xác khi Player 1 thắng', () => {
+      let state = caroEngine.init({ playerCount: 2 });
+      // Player 0 đánh phân tán
+      // Player 1 đánh 5 quân dọc: (5,0), (5,1), (5,2), (5,3), (5,4)
+      state = caroEngine.applyMove(state, idx(0, 0, 15), 0);
+      state = caroEngine.applyMove(state, idx(5, 0, 15), 1);
+      state = caroEngine.applyMove(state, idx(1, 0, 15), 0);
+      state = caroEngine.applyMove(state, idx(5, 1, 15), 1);
+      state = caroEngine.applyMove(state, idx(2, 0, 15), 0);
+      state = caroEngine.applyMove(state, idx(5, 2, 15), 1);
+      state = caroEngine.applyMove(state, idx(3, 0, 15), 0);
+      state = caroEngine.applyMove(state, idx(5, 3, 15), 1);
+      state = caroEngine.applyMove(state, idx(0, 5, 15), 0);
+      state = caroEngine.applyMove(state, idx(5, 4, 15), 1); // Nước thắng của Player 1
+
+      const terminal = caroEngine.isTerminal(state);
+      expect(terminal.over).toBe(true);
+      expect(terminal.outcomes).toEqual([
+        { playerIndex: 1, outcome: 'win' },
+        { playerIndex: 0, outcome: 'loss' },
+      ]);
+    });
+
+    it('trả về over: true và outcomes hòa (draw) khi bàn cờ đầy không ai thắng', () => {
+      const baseState = caroEngine.init({
+        playerCount: 2,
+        options: { boardSize: 5, winLength: 5 },
+      });
+
+      // Bàn cờ 5x5 hòa: không có 5 quân cùng loại trên hàng/cột/chéo
+      const drawBoard = [0, 0, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0];
+
+      const drawState: CaroState = {
+        ...baseState,
+        board: drawBoard,
+        currentPlayer: 1,
+        moveCount: 25,
+        lastMove: 24,
+      };
+
+      const terminal = caroEngine.isTerminal(drawState);
+      expect(terminal.over).toBe(true);
+      expect(terminal.outcomes).toEqual([
+        { playerIndex: 0, outcome: 'draw' },
+        { playerIndex: 1, outcome: 'draw' },
+      ]);
+    });
+
+    it('isTerminal phát hiện thắng qua checkWinFullScan khi lastMove là null', () => {
+      const baseState = caroEngine.init({ playerCount: 2 });
+      const board = [...baseState.board];
+
+      // Đặt 5 quân X liên tiếp
+      for (let i = 0; i < 5; i++) {
+        board[idx(i, 0, 15)] = 0;
       }
+
+      const stateWithoutLastMove: CaroState = {
+        ...baseState,
+        board,
+        lastMove: null,
+      };
+
+      const terminal = caroEngine.isTerminal(stateWithoutLastMove);
+      expect(terminal.over).toBe(true);
+      expect(terminal.outcomes).toEqual([
+        { playerIndex: 0, outcome: 'win' },
+        { playerIndex: 1, outcome: 'loss' },
+      ]);
+    });
+
+    it('cố tình applyMove sau khi ván đấu đã kết thúc ném lỗi GAME_OVER', () => {
+      let state = caroEngine.init({ playerCount: 2 });
+      state = caroEngine.applyMove(state, idx(0, 0, 15), 0);
+      state = caroEngine.applyMove(state, idx(0, 1, 15), 1);
+      state = caroEngine.applyMove(state, idx(1, 0, 15), 0);
+      state = caroEngine.applyMove(state, idx(1, 1, 15), 1);
+      state = caroEngine.applyMove(state, idx(2, 0, 15), 0);
+      state = caroEngine.applyMove(state, idx(2, 1, 15), 1);
+      state = caroEngine.applyMove(state, idx(3, 0, 15), 0);
+      state = caroEngine.applyMove(state, idx(3, 1, 15), 1);
+      state = caroEngine.applyMove(state, idx(4, 0, 15), 0); // Player 0 thắng
+
+      // Cố tình đánh thêm 1 nước
+      expect(() => caroEngine.applyMove(state, idx(5, 5, 15), 1)).toThrowError(EngineError);
+      try {
+        caroEngine.applyMove(state, idx(5, 5, 15), 1);
+      } catch (err) {
+        expect(err).toBeInstanceOf(EngineError);
+        expect((err as EngineError).code).toBe('GAME_OVER');
+      }
+    });
+
+    it('legalMoves trả về [] khi ván đấu đã có người thắng', () => {
+      let state = caroEngine.init({ playerCount: 2 });
+      state = caroEngine.applyMove(state, idx(0, 0, 15), 0);
+      state = caroEngine.applyMove(state, idx(0, 1, 15), 1);
+      state = caroEngine.applyMove(state, idx(1, 0, 15), 0);
+      state = caroEngine.applyMove(state, idx(1, 1, 15), 1);
+      state = caroEngine.applyMove(state, idx(2, 0, 15), 0);
+      state = caroEngine.applyMove(state, idx(2, 1, 15), 1);
+      state = caroEngine.applyMove(state, idx(3, 0, 15), 0);
+      state = caroEngine.applyMove(state, idx(3, 1, 15), 1);
+      state = caroEngine.applyMove(state, idx(4, 0, 15), 0); // Player 0 thắng
+
+      expect(caroEngine.legalMoves(state, 1)).toEqual([]);
     });
   });
 
@@ -401,6 +555,26 @@ describe('Caro Game Engine (P1.1a & P1.1b)', () => {
 
       expect(deserialized).toEqual(oddState);
       expect(caroEngine.serialize(deserialized)).toBe(serialized);
+    });
+
+    it('round-trip bảo toàn với bàn cờ có quân đơn lẻ ở ô cuối cùng (index 224)', () => {
+      const baseState = caroEngine.init({ playerCount: 2 });
+      const board = [...baseState.board];
+      board[224] = 0; // X tại ô cuối cùng
+
+      const singleEndState: CaroState = {
+        ...baseState,
+        board,
+        currentPlayer: 1,
+        moveCount: 1,
+        lastMove: 224,
+      };
+
+      const serialized = caroEngine.serialize(singleEndState);
+      expect(serialized.endsWith(':224.x')).toBe(true);
+
+      const deserialized = caroEngine.deserialize(serialized);
+      expect(deserialized).toEqual(singleEndState);
     });
 
     it('round-trip bảo toàn 100% với bàn cờ 60 nước đi và kích thước siêu tối ưu', () => {
@@ -508,6 +682,9 @@ describe('Caro Game Engine (P1.1a & P1.1b)', () => {
     });
 
     it('ném INVALID_STATE khi chuỗi RLE chứa ký tự lạ hoặc lỗi cú pháp', () => {
+      // RLE rỗng
+      expect(() => caroEngine.deserialize('v1:15:5:1:1:0:0:-1:')).toThrowError(EngineError);
+
       // Ký tự lạ
       expect(() => caroEngine.deserialize('v1:15:5:1:1:0:0:-1:224.z')).toThrowError(EngineError);
       expect(() => caroEngine.deserialize('v1:15:5:1:1:0:0:-1:224.X')).toThrowError(EngineError);
