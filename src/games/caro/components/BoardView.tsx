@@ -25,12 +25,16 @@ export interface BoardViewProps {
   readonly winLine: readonly number[] | null;
   /** Index ô đang preview trước khi xác nhận đánh (P1.3b dùng) */
   readonly previewCell?: number | null;
+  /** Index ô đang nháy cảnh báo lỗi (chạm ô đã có quân) */
+  readonly errorFlashCell?: number | null;
   /** Người chơi của nước đi preview (0: X, 1: O) */
   readonly previewPlayer?: number;
   /** Kích thước 1 ô cờ tính theo pixel (do cha quyết định) */
   readonly cellSizePx: number;
-  /** Callback khi người chơi chạm/click vào ô cờ (sẵn sàng cho P1.3b) */
-  readonly onCellPointerDown?: (index: number) => void;
+  /** Callback khi người chơi pointerdown vào ô cờ */
+  readonly onCellPointerDown?: (index: number, e: React.PointerEvent<HTMLDivElement>) => void;
+  /** Callback khi người chơi pointerup vào ô cờ */
+  readonly onCellPointerUp?: (index: number, e: React.PointerEvent<HTMLDivElement>) => void;
   /** ClassName tùy biến cho container bên ngoài */
   readonly className?: string;
 }
@@ -41,9 +45,11 @@ export const BoardView: React.FC<BoardViewProps> = ({
   lastMove,
   winLine,
   previewCell = null,
+  errorFlashCell = null,
   previewPlayer = 0,
   cellSizePx,
   onCellPointerDown,
+  onCellPointerUp,
   className = '',
 }) => {
   // Tạo Set tra cứu nhanh O(1) cho danh sách các ô thuộc chuỗi thắng
@@ -53,12 +59,21 @@ export const BoardView: React.FC<BoardViewProps> = ({
 
   // Callback ổn định truyền xuống từng ô
   const handleCellPointerDown = useCallback(
-    (cellIndex: number) => {
+    (cellIndex: number, e: React.PointerEvent<HTMLDivElement>) => {
       if (onCellPointerDown) {
-        onCellPointerDown(cellIndex);
+        onCellPointerDown(cellIndex, e);
       }
     },
     [onCellPointerDown],
+  );
+
+  const handleCellPointerUp = useCallback(
+    (cellIndex: number, e: React.PointerEvent<HTMLDivElement>) => {
+      if (onCellPointerUp) {
+        onCellPointerUp(cellIndex, e);
+      }
+    },
+    [onCellPointerUp],
   );
 
   const totalWidth = boardSize * cellSizePx;
@@ -89,6 +104,7 @@ export const BoardView: React.FC<BoardViewProps> = ({
           const isLast = lastMove === index;
           const isWin = winLineSet !== null && winLineSet.has(index);
           const isPreview = previewCell === index;
+          const isErrorFlash = errorFlashCell === index;
 
           return (
             <CaroCell
@@ -98,9 +114,11 @@ export const BoardView: React.FC<BoardViewProps> = ({
               isLast={isLast}
               isWin={isWin}
               isPreview={isPreview}
+              isErrorFlash={isErrorFlash}
               previewPlayer={previewPlayer}
               cellSizePx={cellSizePx}
               onPointerDown={handleCellPointerDown}
+              onPointerUp={handleCellPointerUp}
             />
           );
         })}

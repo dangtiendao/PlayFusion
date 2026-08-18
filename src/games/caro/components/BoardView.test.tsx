@@ -116,7 +116,7 @@ describe('Caro BoardView Component (BoardView.tsx - P1.3a)', () => {
     fireEvent.pointerDown(cell8);
 
     expect(onPointerDown).toHaveBeenCalledTimes(1);
-    expect(onPointerDown).toHaveBeenCalledWith(8);
+    expect(onPointerDown.mock.calls[0]?.[0]).toBe(8);
   });
 
   it('tối ưu re-render: khi cập nhật 1 ô trong board, các ô khác giữ nguyên trạng thái DOM', () => {

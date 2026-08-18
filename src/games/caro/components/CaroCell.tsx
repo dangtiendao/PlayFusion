@@ -29,12 +29,16 @@ export interface CaroCellProps {
   readonly isWin: boolean;
   /** Ô này có đang hiển thị preview nước đi không? (P1.3b dùng) */
   readonly isPreview: boolean;
+  /** Ô này có đang nháy cảnh báo lỗi (chạm ô đã có quân) không? */
+  readonly isErrorFlash?: boolean;
   /** Người chơi của nước đi preview (0: X, 1: O) */
   readonly previewPlayer?: number;
   /** Kích thước cạnh ô tính theo pixel */
   readonly cellSizePx: number;
-  /** Callback khi người chơi chạm/click vào ô */
-  readonly onPointerDown?: (index: number) => void;
+  /** Callback khi người chơi pointerdown vào ô */
+  readonly onPointerDown?: (index: number, e: React.PointerEvent<HTMLDivElement>) => void;
+  /** Callback khi người chơi pointerup vào ô */
+  readonly onPointerUp?: (index: number, e: React.PointerEvent<HTMLDivElement>) => void;
 }
 
 /**
@@ -74,15 +78,29 @@ export const CaroCell = memo<CaroCellProps>(function CaroCell({
   isLast,
   isWin,
   isPreview,
+  isErrorFlash = false,
   previewPlayer = 0,
   cellSizePx,
   onPointerDown,
+  onPointerUp,
 }) {
-  const handlePointerDown = useCallback(() => {
-    if (onPointerDown) {
-      onPointerDown(index);
-    }
-  }, [index, onPointerDown]);
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (onPointerDown) {
+        onPointerDown(index, e);
+      }
+    },
+    [index, onPointerDown],
+  );
+
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (onPointerUp) {
+        onPointerUp(index, e);
+      }
+    },
+    [index, onPointerUp],
+  );
 
   // Xác định quân cờ cần vẽ (quân thật hoặc quân preview)
   const pieceToRender = value !== -1 ? value : isPreview ? previewPlayer : -1;
@@ -90,7 +108,9 @@ export const CaroCell = memo<CaroCellProps>(function CaroCell({
   // Lớp CSS viền và nền ô cờ
   let cellBgClass =
     'bg-slate-100/90 dark:bg-slate-800/80 hover:bg-slate-200/90 dark:hover:bg-slate-700/80';
-  if (isWin) {
+  if (isErrorFlash) {
+    cellBgClass = 'bg-rose-500/25 dark:bg-rose-500/30';
+  } else if (isWin) {
     cellBgClass = 'bg-amber-400/30 dark:bg-amber-400/35 animate-pulse';
   } else if (isLast) {
     cellBgClass = 'bg-indigo-50 dark:bg-indigo-950/40';
@@ -98,7 +118,9 @@ export const CaroCell = memo<CaroCellProps>(function CaroCell({
 
   // Viền và hiệu ứng highlight
   let cellHighlightClass = '';
-  if (isWin) {
+  if (isErrorFlash) {
+    cellHighlightClass = 'ring-2 ring-rose-500 dark:ring-rose-400 ring-inset z-20 animate-pulse';
+  } else if (isWin) {
     cellHighlightClass = 'ring-2 ring-amber-400 dark:ring-amber-300 ring-inset z-10';
   } else if (isLast) {
     cellHighlightClass = 'ring-2 ring-indigo-500 dark:ring-indigo-400 ring-inset z-10';
@@ -115,8 +137,10 @@ export const CaroCell = memo<CaroCellProps>(function CaroCell({
       data-last-move={isLast ? 'true' : undefined}
       data-win-line={isWin ? 'true' : undefined}
       data-preview={isPreview ? 'true' : undefined}
+      data-error-flash={isErrorFlash ? 'true' : undefined}
       data-value={value}
       onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
       style={{
         width: `${cellSizePx}px`,
         height: `${cellSizePx}px`,
