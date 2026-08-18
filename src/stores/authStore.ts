@@ -1,6 +1,6 @@
 /**
  * ==============================================================================
- * AUTH STORE (ZUSTAND STORE QUẢN LÝ TRẠNG THÁI XÁC THỰC)
+ * AUTH STORE (ZUSTAND STORE QUẢN LÝ TRẠNG THÁI XÁC THỰC & HỒ SƠ NGƯỜI DÙNG)
  * ==============================================================================
  *
  * GHI CHÚ KIẾN TRÚC QUAN TRỌNG:
@@ -14,6 +14,9 @@
  * 3. NGUYÊN TẮC OFFLINE-FIRST (BẤT BIẾN):
  *    Trạng thái `loading` hoặc `error` của Auth STORE TUYỆT ĐỐI KHÔNG BAO GIỜ chặn
  *    giao diện hoặc làm gián đoạn các trò chơi offline (như Cờ Caro, Ô ăn quan).
+ * 4. TỰ ĐỘNG ĐỒNG BỘ PROFILE (P2.1c):
+ *    Sau khi xác thực hoặc khi nhận sự kiện `USER_UPDATED` (nâng cấp Google),
+ *    store tự động nạp hồ sơ từ `profileRepository` để đồng bộ tên và avatar ngay lập tức.
  * ==============================================================================
  */
 
@@ -28,12 +31,19 @@ import {
   onAuthStateChange,
   type AppAuthUser,
 } from '@/repositories/authRepository';
+import {
+  getMyProfile,
+  updateDisplayName as repoUpdateDisplayName,
+  type Profile,
+} from '@/repositories/profileRepository';
 
 export type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'error';
 
 export interface AuthState {
-  /** Thông tin người dùng hiện tại (khách ẩn danh hoặc tài khoản Google) */
+  /** Thông tin xác thực người dùng hiện tại */
   readonly user: AppAuthUser | null;
+  /** Thông tin hồ sơ người dùng từ bảng public.profiles (P2.1c) */
+  readonly profile: Profile | null;
   /** Trạng thái xác thực */
   readonly status: AuthStatus;
   /** Thông điệp lỗi gần nhất (nếu có) */
@@ -43,6 +53,10 @@ export interface AuthState {
 
   /** Khởi tạo phiên làm việc ban đầu (gọi 1 lần duy nhất từ App root) */
   readonly init: () => Promise<void>;
+  /** Nạp thông tin hồ sơ Profile từ cơ sở dữ liệu */
+  readonly loadProfile: () => Promise<Profile | null>;
+  /** Cập nhật tên hiển thị của người dùng */
+  readonly updateDisplayName: (name: string) => Promise<void>;
   /** Đăng nhập trực tiếp bằng Google OAuth */
   readonly signInWithGoogle: (options?: { redirectTo?: string }) => Promise<void>;
   /** Nâng cấp tài khoản khách ẩn danh hiện tại lên Google (giữ nguyên user id) */
@@ -59,9 +73,36 @@ let authSubscriptionCleanup: (() => void) | null = null;
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
+  profile: null,
   status: 'loading',
   error: null,
   isInitialized: false,
+
+  loadProfile: async () => {
+    try {
+      const profile = await getMyProfile();
+      set({ profile });
+      return profile;
+    } catch {
+      // Khi bảng profiles chưa tạo hoặc lỗi mạng offline, không throw để bảo vệ Offline-First
+      return null;
+    }
+  },
+
+  updateDisplayName: async (name: string) => {
+    set({ error: null });
+    try {
+      const updatedProfile = await repoUpdateDisplayName(name);
+      set((state) => ({
+        profile: updatedProfile,
+        user: state.user ? { ...state.user, displayName: updatedProfile.displayName } : null,
+      }));
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Cập nhật tên hiển thị thất bại.';
+      set({ error: errorMessage });
+      throw err;
+    }
+  },
 
   init: async () => {
     // Chống gọi init trùng lặp khi đang chạy hoặc đã khởi tạo
@@ -96,6 +137,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         });
       }
 
+      // Tự động nạp profile chạy ngầm
+      void get().loadProfile();
+
       // 2. Đăng ký lắng nghe sự kiện Auth nếu chưa đăng ký
       if (!authSubscriptionCleanup) {
         const { unsubscribe } = onAuthStateChange((event, user) => {
@@ -105,9 +149,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
               status: 'authenticated',
               error: null,
             });
+            // Reload profile khi có thay đổi trạng thái xác thực
+            void get().loadProfile();
           } else if (event === 'SIGNED_OUT') {
             set({
               user: null,
+              profile: null,
               status: 'unauthenticated',
             });
           }
@@ -151,17 +198,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signOut: async () => {
-    set({ status: 'loading', error: null });
+    set({ status: 'loading', error: null, profile: null });
     try {
       await repoSignOut();
       // Sau khi đăng xuất, tự động tạo lại phiên khách ẩn danh mới
-      // để người dùng luôn có tài khoản sẵn sàng chơi offline/online
       const newAnonUser = await signInAnonymously();
       set({
         user: newAnonUser,
         status: 'authenticated',
         error: null,
       });
+      // Tải profile cho tài khoản khách mới
+      void get().loadProfile();
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'Đăng xuất thất bại.';
       set({ status: 'error', error: errorMessage });
@@ -176,6 +224,21 @@ export const useAuthStore = create<AuthState>((set, get) => ({
  * Hook tiện ích lấy thông tin người dùng hiện tại.
  */
 export const useAuthUser = () => useAuthStore((state) => state.user);
+
+/**
+ * Hook tiện ích lấy thông tin Profile hiện tại.
+ */
+export const useAuthProfile = () => useAuthStore((state) => state.profile);
+
+/**
+ * Hook tiện ích lấy tên hiển thị ưu tiên (Profile -> User -> Mặc định).
+ */
+export const useDisplayName = () =>
+  useAuthStore((state) => {
+    if (state.profile?.displayName) return state.profile.displayName;
+    if (state.user?.displayName) return state.user.displayName;
+    return state.user?.isAnonymous ? 'Người chơi khách' : 'Người chơi';
+  });
 
 /**
  * Hook tiện ích kiểm tra xem người dùng có đang ở chế độ khách ẩn danh hay không.
@@ -204,6 +267,7 @@ export function _resetAuthStoreForTesting(): void {
   }
   useAuthStore.setState({
     user: null,
+    profile: null,
     status: 'loading',
     error: null,
     isInitialized: false,

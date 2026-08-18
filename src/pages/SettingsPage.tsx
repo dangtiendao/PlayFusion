@@ -9,7 +9,6 @@ import type { RegistryEntry } from '@/games/types';
 import { hasGameData, clearGameData } from '@/core/gameLocalData';
 import { ConfirmDialog } from '@/components/game-shell/ConfirmDialog';
 import { checkConnection, type HealthCheckResult } from '@/repositories/healthRepository';
-import { useAuthStore } from '@/stores/authStore';
 
 /**
  * ==============================================================================
@@ -21,7 +20,7 @@ import { useAuthStore } from '@/stores/authStore';
  * 2. Đạt chuẩn Mobile-First UX: Vùng chạm $\ge 44\times 44\text{px}$, hiệu ứng chuyển trạng thái mượt mà.
  * 3. Tích hợp công cụ chẩn đoán phần cứng (Audio, Haptics, Unified Press) phục vụ kiểm chứng P0.8b.
  * 4. Quản lý dọn dẹp dữ liệu cục bộ từng game (P1.5c): render động từ Registry, không hard-code.
- * 5. Quản lý tài khoản tạm P2.1b (Ẩn danh, Nâng cấp Google, Đăng xuất).
+ * 5. Chẩn đoán kết nối Supabase (P2.1a): đo latency và hiển thị projectRef.
  * ==============================================================================
  */
 
@@ -32,17 +31,6 @@ export function SettingsPage() {
   const toggleSound = useSettingsStore((state) => state.toggleSound);
   const hapticEnabled = useSettingsStore((state) => state.hapticEnabled);
   const toggleHaptic = useSettingsStore((state) => state.toggleHaptic);
-
-  // State xác thực người dùng (P2.1b)
-  const authUser = useAuthStore((state) => state.user);
-  const authStatus = useAuthStore((state) => state.status);
-  const authError = useAuthStore((state) => state.error);
-  const linkGoogle = useAuthStore((state) => state.linkGoogle);
-  const signInWithGoogle = useAuthStore((state) => state.signInWithGoogle);
-  const authSignOut = useAuthStore((state) => state.signOut);
-
-  const [isSigningInGoogle, setIsSigningInGoogle] = useState<boolean>(false);
-  const [showSignOutConfirm, setShowSignOutConfirm] = useState<boolean>(false);
 
   // State quản lý danh sách game có dữ liệu cục bộ (P1.5c)
   const [dataVersion, setDataVersion] = useState<number>(0);
@@ -92,40 +80,6 @@ export function SettingsPage() {
     return () => clearInterval(timer);
   }, []);
 
-  const handleGoogleAuth = async () => {
-    setIsSigningInGoogle(true);
-    try {
-      if (authUser?.isAnonymous) {
-        await linkGoogle();
-      } else {
-        await signInWithGoogle();
-      }
-    } catch {
-      // Error đã được lưu trong authStore và hiển thị trên UI
-    } finally {
-      setIsSigningInGoogle(false);
-    }
-  };
-
-  const handleSignOutClick = () => {
-    if (authUser?.isAnonymous) {
-      setShowSignOutConfirm(true);
-    } else {
-      performSignOut();
-    }
-  };
-
-  const performSignOut = async () => {
-    setShowSignOutConfirm(false);
-    try {
-      await authSignOut();
-      audioManager.playSfx('click');
-      hapticTap();
-    } catch {
-      // Error được lưu trong authStore
-    }
-  };
-
   const pressHandlers = useUnifiedPress(() => {
     setPressCount((c) => c + 1);
     hapticTap();
@@ -149,114 +103,11 @@ export function SettingsPage() {
           Cài Đặt Hệ Thống
         </h2>
         <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">
-          Tùy chỉnh tài khoản, giao diện, âm thanh và kiểm tra máy chủ.
+          Tùy chỉnh giao diện, âm thanh, dữ liệu và kiểm tra kết nối máy chủ.
         </p>
       </section>
 
-      {/* 1. NHÓM TÀI KHOẢN NGƯỜI DÙNG (TẠM P2.1b — Trang Profile chính thức ở P2.1c) */}
-      <section
-        data-testid="auth-account-section"
-        className="bg-surface dark:bg-surface-dark rounded-2xl border border-surface-border dark:border-surface-dark-border p-5 shadow-sm space-y-4"
-      >
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-              👤 Tài Khoản Người Dùng
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Quản lý tài khoản khách ẩn danh & nâng cấp Google
-            </p>
-          </div>
-          <span className="text-[11px] px-2 py-0.5 rounded-full bg-primary-100 dark:bg-primary-950 text-primary-700 dark:text-primary-300 font-semibold border border-primary-200 dark:border-primary-800">
-            P2.1b Auth
-          </span>
-        </div>
-
-        {/* Thẻ thông tin User */}
-        <div className="p-3.5 rounded-xl bg-surface-muted dark:bg-surface-dark-muted border border-surface-border/60 dark:border-surface-dark-border/60 space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 overflow-hidden">
-              {authUser?.avatarUrl ? (
-                <img
-                  src={authUser.avatarUrl}
-                  alt={authUser.displayName ?? 'Avatar'}
-                  className="w-10 h-10 rounded-full object-cover border border-primary-300 dark:border-primary-700 flex-shrink-0"
-                />
-              ) : (
-                <div className="w-10 h-10 rounded-full bg-primary-100 dark:bg-primary-950 text-primary-700 dark:text-primary-300 flex items-center justify-center font-bold text-base border border-primary-200 dark:border-primary-800 flex-shrink-0">
-                  {authUser?.isAnonymous ? '👤' : 'G'}
-                </div>
-              )}
-
-              <div className="truncate">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">
-                    {authUser?.displayName ||
-                      (authUser?.isAnonymous ? 'Người chơi khách' : 'Người chơi')}
-                  </h4>
-                  <span
-                    data-testid="auth-badge"
-                    className={`text-[10px] px-2 py-0.5 rounded-md font-semibold ${
-                      authUser?.isAnonymous
-                        ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
-                        : 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
-                    }`}
-                  >
-                    {authUser?.isAnonymous ? 'Khách (Ẩn danh)' : 'Google Account'}
-                  </span>
-                </div>
-
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-mono mt-0.5 truncate">
-                  ID:{' '}
-                  {authUser
-                    ? `${authUser.id.slice(0, 8)}...${authUser.id.slice(-4)}`
-                    : 'Đang tải...'}
-                  {authUser?.email && (
-                    <span className="ml-2 font-sans text-slate-600 dark:text-slate-300">
-                      ({authUser.email})
-                    </span>
-                  )}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Lỗi Auth (nếu có) */}
-          {authError && (
-            <div className="p-2.5 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300 font-medium">
-              ⚠️ {authError}
-            </div>
-          )}
-
-          {/* Nút hành động */}
-          <div className="flex items-center gap-2 pt-1">
-            {authUser?.isAnonymous && (
-              <button
-                type="button"
-                data-testid="link-google-btn"
-                onClick={handleGoogleAuth}
-                disabled={isSigningInGoogle || authStatus === 'loading'}
-                className="flex-1 min-h-[44px] inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-primary-600 hover:bg-primary-700 text-white font-semibold text-xs transition-all shadow-sm active:scale-95 disabled:opacity-50"
-              >
-                <span>🌐</span>
-                <span>{isSigningInGoogle ? 'Đang chuyển hướng...' : 'Đăng nhập Google'}</span>
-              </button>
-            )}
-
-            <button
-              type="button"
-              data-testid="sign-out-btn"
-              onClick={handleSignOutClick}
-              disabled={authStatus === 'loading'}
-              className="min-h-[44px] px-4 py-2 rounded-xl bg-surface dark:bg-surface-dark border border-surface-border dark:border-surface-dark-border text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-rose-50 dark:hover:bg-rose-950/30 hover:text-rose-600 dark:hover:text-rose-400 hover:border-rose-200 dark:hover:border-rose-800 transition-all active:scale-95 disabled:opacity-50"
-            >
-              Đăng xuất
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {/* 2. NHÓM CÀI ĐẶT GIAO DIỆN (THEME) */}
+      {/* 1. NHÓM CÀI ĐẶT GIAO DIỆN (THEME) */}
       <section className="bg-surface dark:bg-surface-dark rounded-2xl border border-surface-border dark:border-surface-dark-border p-5 shadow-sm space-y-3">
         <div>
           <h3 className="text-sm font-bold text-slate-900 dark:text-white">
@@ -600,19 +451,6 @@ export function SettingsPage() {
             setDataVersion((v) => v + 1);
           }}
           onCancel={() => setGameToClear(null)}
-        />
-      )}
-
-      {/* Dialog xác nhận đăng xuất tài khoản khách */}
-      {showSignOutConfirm && (
-        <ConfirmDialog
-          isOpen={true}
-          title="Đăng xuất tài khoản khách?"
-          message="Đăng xuất tài khoản khách ẩn danh sẽ tạo một tài khoản khách mới. Dữ liệu thành tích và lịch sử của tài khoản này sẽ không thể khôi phục lại trừ khi đã liên kết với Google. Bạn có chắc chắn muốn đăng xuất?"
-          confirmText="Xác nhận đăng xuất"
-          cancelText="Hủy"
-          onConfirm={performSignOut}
-          onCancel={() => setShowSignOutConfirm(false)}
         />
       )}
     </div>
