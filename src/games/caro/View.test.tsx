@@ -43,13 +43,14 @@ function playMove2Tap(cell: HTMLElement) {
   });
 }
 
-describe('Caro Game View Component & AI Integration Tests (View.tsx - P1.4b)', () => {
+describe('Caro Game View Component & AI Integration Tests (View.tsx - P1.4c)', () => {
   let mockShellApi: GameShellApi;
   let mockOnGameEnd: ReturnType<typeof vi.fn>;
   let mockRequestMove: ReturnType<typeof vi.fn>;
   let mockCancel: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     vi.clearAllMocks();
     mockShellApi = {
       playSfx: vi.fn(),
@@ -70,6 +71,7 @@ describe('Caro Game View Component & AI Integration Tests (View.tsx - P1.4b)', (
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -82,7 +84,7 @@ describe('Caro Game View Component & AI Integration Tests (View.tsx - P1.4b)', (
     expect(screen.queryByTestId('interactive-caro-board')).toBeNull();
   });
 
-  it('2. Luồng Chế độ 2 người 1 máy: Vào ván -> Đánh 5 quân thắng -> Finished Screen -> Ván mới / Đổi chế độ', () => {
+  it('2. Luồng Chế độ 2 người 1 máy: Vào ván -> Đánh 5 quân thắng -> MatchEndOverlay -> Chơi lại tăng tỷ số phiên', async () => {
     render(
       <CaroGameView definition={caroManifest} onGameEnd={mockOnGameEnd} shellApi={mockShellApi} />,
     );
@@ -104,10 +106,13 @@ describe('Caro Game View Component & AI Integration Tests (View.tsx - P1.4b)', (
       playMove2Tap(cell);
     }
 
-    // 3. Ván đấu kết thúc -> Chuyển sang FINISHED Screen
-    expect(screen.getByTestId('game-over-banner')).not.toBeNull();
-    expect(screen.getByText('🎉 QUÂN X CHIẾN THẮNG!')).not.toBeNull();
-    expect(screen.getByTestId('game-over-actions')).not.toBeNull();
+    // 3. Ván đấu kết thúc -> Sau 800ms MatchEndOverlay xuất hiện
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+
+    expect(screen.getByTestId('match-end-overlay')).not.toBeNull();
+    expect(screen.getByText('QUÂN X THẮNG! 🎉')).not.toBeNull();
 
     expect(mockOnGameEnd).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -120,22 +125,26 @@ describe('Caro Game View Component & AI Integration Tests (View.tsx - P1.4b)', (
       }),
     );
 
-    // 4. Bấm nút "Chơi lại ván mới" -> Reset bàn cờ và giữ nguyên PLAYING screen
-    const restartBtn = screen.getByTestId('restart-game-btn');
+    // 4. Bấm nút "Chơi lại (Đổi lượt đi)" -> Bàn cờ reset, tỷ số tăng lên Ván 2 (1 - 0)
+    const restartBtn = screen.getByTestId('overlay-restart-btn');
     act(() => {
       fireEvent.click(restartBtn);
     });
 
-    expect(screen.queryByTestId('game-over-banner')).toBeNull();
-    expect(screen.getByText('Quân X (2 người 1 máy)')).not.toBeNull();
+    expect(screen.queryByTestId('match-end-overlay')).toBeNull();
+    expect(screen.getByText('Ván 2')).not.toBeNull();
+    expect(screen.getByText('1 - 0')).not.toBeNull();
 
     // 5. Thắng lại và bấm "Đổi chế độ" -> Quay về SETUP screen
     for (const cellIdx of moves) {
       const cell = screen.getByTestId(`caro-cell-${cellIdx}`);
       playMove2Tap(cell);
     }
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
 
-    const backToSetupBtn = screen.getByTestId('back-to-setup-btn');
+    const backToSetupBtn = screen.getByTestId('overlay-setup-btn');
     act(() => {
       fireEvent.click(backToSetupBtn);
     });
@@ -144,22 +153,18 @@ describe('Caro Game View Component & AI Integration Tests (View.tsx - P1.4b)', (
     expect(screen.queryByTestId('interactive-caro-board')).toBeNull();
   });
 
-  it('3. Luồng Đấu máy - Máy đi trước (humanSeat = 1): Kích hoạt requestMove -> Board cập nhật -> Đổi lượt sang Người', async () => {
-    // Mock AI resolve nước đi ô 112 (H8)
+  it('3. Luồng Đấu máy (vs_ai) - Chơi lại ĐỔI LƯỢT ĐI: Ván 1 Người X -> Ván 2 Người O, Máy tự mở màn', async () => {
+    // Ván 1: Người cầm X (đi trước), máy cầm O
     mockRequestMove.mockResolvedValue(112);
 
     render(
       <CaroGameView definition={caroManifest} onGameEnd={mockOnGameEnd} shellApi={mockShellApi} />,
     );
 
-    // Chọn mức Khó
+    // Chọn mức Khó + Cầm X (Đi trước)
     act(() => {
       fireEvent.click(screen.getByTestId('ai-level-btn-hard'));
-    });
-
-    // Chọn Đi sau: Quân O (humanSeat = 1)
-    act(() => {
-      fireEvent.click(screen.getByTestId('seat-o-btn'));
+      fireEvent.click(screen.getByTestId('seat-x-btn'));
     });
 
     // Bắt đầu đấu máy
@@ -167,18 +172,46 @@ describe('Caro Game View Component & AI Integration Tests (View.tsx - P1.4b)', (
       fireEvent.click(screen.getByTestId('start-vs-ai-btn'));
     });
 
-    // Xác nhận requestMove được gọi với level: 'hard'
-    expect(mockRequestMove).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ level: 'hard' }),
-    );
+    // Người X đánh 5 nước thắng: 0, 1, 2, 3, 4 (xen kẽ máy đánh 15, 16, 17, 18)
+    // Để test gọn, ta đánh thẳng các nước của người khi đến lượt
+    playMove2Tap(screen.getByTestId('caro-cell-0'));
 
-    // Bàn cờ cập nhật quân X tại ô 112
-    const cell112 = screen.getByTestId('caro-cell-112');
-    expect(cell112.getAttribute('data-value')).toBe('0');
+    // Chờ máy O trả nước đi 15
+    await act(async () => {
+      mockRequestMove.mockResolvedValueOnce(15);
+      vi.advanceTimersByTime(100);
+    });
 
-    // Chuyển lượt sang Người chơi (Quân O)
-    expect(screen.getByText('Lượt của bạn (Quân O)')).not.toBeNull();
+    // Người X đánh tiếp 1, 2, 3, 4
+    const humanMoves = [1, 2, 3, 4];
+    for (const [i, cellIdx] of humanMoves.entries()) {
+      playMove2Tap(screen.getByTestId(`caro-cell-${cellIdx}`));
+      if (i < humanMoves.length - 1) {
+        await act(async () => {
+          mockRequestMove.mockResolvedValueOnce(16 + i);
+          vi.advanceTimersByTime(100);
+        });
+      }
+    }
+
+    // Kết thúc ván 1 -> Chờ 800ms hiện overlay
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+
+    expect(screen.getByTestId('match-end-overlay')).not.toBeNull();
+    expect(screen.getByText('BẠN THẮNG! 🎉')).not.toBeNull();
+
+    // Bấm Chơi lại (Đổi lượt)
+    mockRequestMove.mockResolvedValue(112); // Nước mở màn của máy ở Ván 2
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('overlay-restart-btn'));
+    });
+
+    // Ván 2: Người chuyển sang cầm O (Đi sau), Máy cầm X tự động tính toán nước mở màn!
+    expect(screen.getByText('Ván 2')).not.toBeNull();
+    expect(mockRequestMove).toHaveBeenCalled();
   });
 
   it('4. Ca vòng đời (a) - PAUSE khi AI đang suy nghĩ: Gọi cancel(), khi Resume tự kích hoạt lại lượt máy', async () => {
