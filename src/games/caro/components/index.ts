@@ -1,10 +1,8 @@
 /**
  * ==============================================================================
- * CARO GAME PLUGIN MODULE EXPORTS
+ * CARO GAME COMPONENTS EXPORT
  * ==============================================================================
  */
 
-export * from './types';
-export * from './ai-worker-core';
-export * from './useCaroAi';
-export * from './components';
+export * from './CaroCell';
+export * from './BoardView';

@@ -38,6 +38,9 @@ const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
 const AiDemoPage = lazy(() =>
   import('@/pages/dev/AiDemo').then((m) => ({ default: m.AiDemoPage })),
 );
+const BoardDemoPage = lazy(() =>
+  import('@/pages/dev/BoardDemo').then((m) => ({ default: m.BoardDemoPage })),
+);
 
 /**
  * NGUỒN CẤU HÌNH ROUTE DUY NHẤT TOÀN DỰ ÁN
@@ -103,6 +106,16 @@ export const APP_ROUTES: readonly RouteConfig[] = [
     element: (
       <Suspense fallback={<LoadingSpinner message="Đang tải AI Demo..." />}>
         <AiDemoPage />
+      </Suspense>
+    ),
+    showInNav: false,
+  },
+  {
+    path: '/dev/board-demo',
+    label: 'BoardView Demo (P1.3a)',
+    element: (
+      <Suspense fallback={<LoadingSpinner message="Đang tải Board Demo..." />}>
+        <BoardDemoPage />
       </Suspense>
     ),
     showInNav: false,
