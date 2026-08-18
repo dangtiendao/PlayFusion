@@ -86,7 +86,12 @@ export function GamePage() {
 
   return (
     <div className="w-full max-w-2xl mx-auto pb-6">
-      <GameShell definition={definition} onExit={handleExit} isGameCompleted={isGameCompleted}>
+      <GameShell
+        definition={definition}
+        onExit={handleExit}
+        isGameCompleted={isGameCompleted}
+        hasAutoSave={true}
+      >
         <Suspense
           fallback={
             <div className="p-12 text-center">

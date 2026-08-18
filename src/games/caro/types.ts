@@ -53,6 +53,21 @@ export interface CaroMatchConfig {
 }
 
 /**
+ * Dữ liệu phụ đi kèm phiên đấu được lưu trong SavedMatch (P1.5b).
+ */
+export interface CaroSavedSessionExtra {
+  /** Tỷ số phiên đấu hiện tại */
+  readonly sessionScore?: {
+    readonly player1Wins: number;
+    readonly player2Wins: number;
+    readonly draws: number;
+    readonly matchNumber: number;
+  };
+  /** Seed ngẫu nhiên của ván đấu hiện tại */
+  readonly matchSeed?: string;
+}
+
+/**
  * Trạng thái màn hình trong State Machine của Caro Game:
  * - 'setup': Màn hình cấu hình và lựa chọn chế độ chơi (`ModeSelect.tsx`).
  * - 'playing': Màn hình bàn cờ đang diễn ra trận đấu (`InteractiveBoard.tsx`).

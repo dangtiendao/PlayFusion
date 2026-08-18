@@ -1,9 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useSettingsStore, type ThemePreference } from '@/stores/settingsStore';
 import { APP_CONFIG } from '@/config/app';
 import { audioManager } from '@/core/audio';
 import { hapticTap, hapticSuccess, isHapticSupported } from '@/core/haptics';
 import { useUnifiedPress } from '@/core/input';
+import { getAllGames } from '@/games/registry';
+import type { RegistryEntry } from '@/games/types';
+import { hasGameData, clearGameData } from '@/core/gameLocalData';
+import { ConfirmDialog } from '@/components/game-shell/ConfirmDialog';
 
 /**
  * ==============================================================================
@@ -14,6 +18,7 @@ import { useUnifiedPress } from '@/core/input';
  * 1. Toàn bộ cài đặt được quản lý qua `useSettingsStore` và tự động lưu vào localStorage (`wgh:v1:settings`).
  * 2. Đạt chuẩn Mobile-First UX: Vùng chạm $\ge 44\times 44\text{px}$, hiệu ứng chuyển trạng thái mượt mà.
  * 3. Tích hợp công cụ chẩn đoán phần cứng (Audio, Haptics, Unified Press) phục vụ kiểm chứng P0.8b.
+ * 4. Quản lý dọn dẹp dữ liệu cục bộ từng game (P1.5c): render động từ Registry, không hard-code.
  * ==============================================================================
  */
 
@@ -24,6 +29,16 @@ export function SettingsPage() {
   const toggleSound = useSettingsStore((state) => state.toggleSound);
   const hapticEnabled = useSettingsStore((state) => state.hapticEnabled);
   const toggleHaptic = useSettingsStore((state) => state.toggleHaptic);
+
+  // State quản lý danh sách game có dữ liệu cục bộ (P1.5c)
+  const [dataVersion, setDataVersion] = useState<number>(0);
+  const [gameToClear, setGameToClear] = useState<RegistryEntry | null>(null);
+
+  const gamesWithData = useMemo(() => {
+    // dataVersion dependency để tính toán lại khi xóa dữ liệu
+    if (dataVersion < 0) return [];
+    return getAllGames().filter((g) => hasGameData(g.definition.id));
+  }, [dataVersion]);
 
   // State chẩn đoán phần cứng cho Demo P0.8b
   const [audioState, setAudioState] = useState<string>('Đang kiểm tra...');
@@ -263,7 +278,59 @@ export function SettingsPage() {
         </div>
       </section>
 
-      {/* 4. NHÓM THÔNG TIN PHIÊN BẢN */}
+      {/* 4. NHÓM DỮ LIỆU TRÒ CHƠI CỤC BỘ (P1.5c) */}
+      <section
+        data-testid="game-data-settings-section"
+        className="bg-surface dark:bg-surface-dark rounded-2xl border border-surface-border dark:border-surface-dark-border p-5 shadow-sm space-y-4"
+      >
+        <div>
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+            Dữ liệu trò chơi cục bộ
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            Quản lý và dọn dẹp bộ nhớ lưu trữ điểm số, lịch sử và ván dở của từng game
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          {gamesWithData.length > 0 ? (
+            gamesWithData.map((game) => (
+              <div
+                key={game.definition.id}
+                data-testid={`game-data-row-${game.definition.id}`}
+                className="flex items-center justify-between p-3 rounded-xl bg-surface-muted dark:bg-surface-dark-muted border border-surface-border/60 dark:border-surface-dark-border/60"
+              >
+                <div className="flex items-center gap-2.5">
+                  <span className="text-xl">{game.definition.icon ?? '🎮'}</span>
+                  <div>
+                    <h4 className="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-200">
+                      {game.definition.name}
+                    </h4>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Có dữ liệu thống kê & lịch sử
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  data-testid={`clear-game-data-btn-${game.definition.id}`}
+                  onClick={() => setGameToClear(game)}
+                  className="min-h-[44px] px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 font-semibold text-xs active:scale-95 transition-all"
+                >
+                  Xóa dữ liệu
+                </button>
+              </div>
+            ))
+          ) : (
+            <p className="text-xs text-slate-500 dark:text-slate-400 italic py-2 text-center">
+              Hiện chưa có dữ liệu lưu trữ cục bộ nào cần xóa.
+            </p>
+          )}
+        </div>
+      </section>
+
+      {/* 5. NHÓM THÔNG TIN PHIÊN BẢN */}
       <section className="bg-surface dark:bg-surface-dark rounded-2xl border border-surface-border dark:border-surface-dark-border p-5 shadow-sm">
         <div className="flex items-center justify-between">
           <div>
@@ -279,6 +346,25 @@ export function SettingsPage() {
           </span>
         </div>
       </section>
+
+      {/* Dialog xác nhận xóa dữ liệu game */}
+      {gameToClear && (
+        <ConfirmDialog
+          isOpen={true}
+          title="Xác nhận xóa dữ liệu?"
+          message={`Xóa toàn bộ thống kê, lịch sử và ván dở của "${gameToClear.definition.name}"? Hành động này không thể hoàn tác.`}
+          confirmText="Xóa sạch"
+          cancelText="Hủy"
+          onConfirm={() => {
+            clearGameData(gameToClear.definition.id);
+            audioManager.playSfx('click');
+            hapticSuccess();
+            setGameToClear(null);
+            setDataVersion((v) => v + 1);
+          }}
+          onCancel={() => setGameToClear(null)}
+        />
+      )}
     </div>
   );
 }

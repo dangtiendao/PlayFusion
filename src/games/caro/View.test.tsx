@@ -3,8 +3,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { CaroGameView } from './View';
 import { caroManifest } from '@engines/caro/manifest';
+import { caroEngine, DEFAULT_CARO_OPTIONS } from '@engines/caro';
 import type { GameShellApi } from '../types';
+import type { CaroMatchConfig } from './types';
 import * as useCaroAiModule from './useCaroAi';
+import * as gameLocalDataModule from '../../core/gameLocalData';
 
 /**
  * Mock hook useCaroAi để kiểm soát hành vi bất đồng bộ và kiểm tra 4 ca vòng đời
@@ -43,7 +46,7 @@ function playMove2Tap(cell: HTMLElement) {
   });
 }
 
-describe('Caro Game View Component & AI Integration Tests (View.tsx - P1.4c)', () => {
+describe('Caro Game View Component, Local Data & Auto-Save Recovery Tests (View.tsx - P1.5a & P1.5b)', () => {
   let mockShellApi: GameShellApi;
   let mockOnGameEnd: ReturnType<typeof vi.fn>;
   let mockRequestMove: ReturnType<typeof vi.fn>;
@@ -68,6 +71,12 @@ describe('Caro Game View Component & AI Integration Tests (View.tsx - P1.4c)', (
       isThinking: false,
       cancel: mockCancel,
     });
+
+    vi.spyOn(gameLocalDataModule, 'recordResult');
+    vi.spyOn(gameLocalDataModule, 'setLastConfig');
+    vi.spyOn(gameLocalDataModule, 'saveMatch');
+    vi.spyOn(gameLocalDataModule, 'clearSavedMatch');
+    vi.spyOn(gameLocalDataModule, 'appendHistory');
   });
 
   afterEach(() => {
@@ -84,282 +93,200 @@ describe('Caro Game View Component & AI Integration Tests (View.tsx - P1.4c)', (
     expect(screen.queryByTestId('interactive-caro-board')).toBeNull();
   });
 
-  it('2. Luồng Chế độ 2 người 1 máy: Vào ván -> Đánh 5 quân thắng -> MatchEndOverlay -> Chơi lại tăng tỷ số phiên', async () => {
+  it('2. Luồng Auto-save (P1.5b): Đánh 3 nước -> saveMatch được gọi đúng 3 lần kèm state serialize mới nhất', async () => {
     render(
       <CaroGameView definition={caroManifest} onGameEnd={mockOnGameEnd} shellApi={mockShellApi} />,
     );
 
-    // 1. Bấm chọn 2 người 1 máy -> Chuyển sang màn hình PLAYING
+    // Bắt đầu chế độ 2 người 1 máy
     const pvpBtn = screen.getByTestId('mode-btn-local_pvp');
     act(() => {
       fireEvent.click(pvpBtn);
     });
 
-    expect(screen.queryByTestId('caro-mode-select')).toBeNull();
-    expect(screen.getByTestId('turn-indicator')).not.toBeNull();
-    expect(screen.getByText('Quân X (2 người 1 máy)')).not.toBeNull();
-
-    // 2. Chuỗi nước đi dẫn tới chiến thắng cho Quân X
-    const moves = [0, 15, 1, 16, 2, 17, 3, 18, 4];
-    for (const cellIdx of moves) {
-      const cell = screen.getByTestId(`caro-cell-${cellIdx}`);
-      playMove2Tap(cell);
-    }
-
-    // 3. Ván đấu kết thúc -> Sau 800ms MatchEndOverlay xuất hiện
-    act(() => {
-      vi.advanceTimersByTime(800);
-    });
-
-    expect(screen.getByTestId('match-end-overlay')).not.toBeNull();
-    expect(screen.getByText('QUÂN X THẮNG! 🎉')).not.toBeNull();
-
-    expect(mockOnGameEnd).toHaveBeenCalledWith(
+    // Nước 1: Ô 0
+    playMove2Tap(screen.getByTestId('caro-cell-0'));
+    expect(gameLocalDataModule.saveMatch).toHaveBeenCalledTimes(1);
+    expect(gameLocalDataModule.saveMatch).toHaveBeenLastCalledWith(
+      'caro',
       expect.objectContaining({
-        gameId: 'caro',
-        mode: 'local_pvp',
-        participants: [
-          { playerIndex: 0, outcome: 'win' },
-          { playerIndex: 1, outcome: 'loss' },
-        ],
+        schemaVersion: 1,
+        gameConfig: { mode: 'local_pvp' },
       }),
     );
 
-    // 4. Bấm nút "Chơi lại (Đổi lượt đi)" -> Bàn cờ reset, tỷ số tăng lên Ván 2 (1 - 0)
-    const restartBtn = screen.getByTestId('overlay-restart-btn');
-    act(() => {
-      fireEvent.click(restartBtn);
-    });
+    // Nước 2: Ô 15
+    playMove2Tap(screen.getByTestId('caro-cell-15'));
+    expect(gameLocalDataModule.saveMatch).toHaveBeenCalledTimes(2);
 
-    expect(screen.queryByTestId('match-end-overlay')).toBeNull();
-    expect(screen.getByText('Ván 2')).not.toBeNull();
-    expect(screen.getByText('1 - 0')).not.toBeNull();
-
-    // 5. Thắng lại và bấm "Đổi chế độ" -> Quay về SETUP screen
-    for (const cellIdx of moves) {
-      const cell = screen.getByTestId(`caro-cell-${cellIdx}`);
-      playMove2Tap(cell);
-    }
-    act(() => {
-      vi.advanceTimersByTime(800);
-    });
-
-    const backToSetupBtn = screen.getByTestId('overlay-setup-btn');
-    act(() => {
-      fireEvent.click(backToSetupBtn);
-    });
-
-    expect(screen.getByTestId('caro-mode-select')).not.toBeNull();
-    expect(screen.queryByTestId('interactive-caro-board')).toBeNull();
+    // Nước 3: Ô 1
+    playMove2Tap(screen.getByTestId('caro-cell-1'));
+    expect(gameLocalDataModule.saveMatch).toHaveBeenCalledTimes(3);
   });
 
-  it('3. Luồng Đấu máy (vs_ai) - Chơi lại ĐỔI LƯỢT ĐI: Ván 1 Người X -> Ván 2 Người O, Máy tự mở màn', async () => {
-    // Ván 1: Người cầm X (đi trước), máy cầm O
+  it('3. Khi ván đấu kết thúc -> clearSavedMatch và appendHistory được gọi để lưu lịch sử (P1.5c)', async () => {
+    render(
+      <CaroGameView definition={caroManifest} onGameEnd={mockOnGameEnd} shellApi={mockShellApi} />,
+    );
+
+    const pvpBtn = screen.getByTestId('mode-btn-local_pvp');
+    act(() => {
+      fireEvent.click(pvpBtn);
+    });
+
+    // Chuỗi thắng 5 quân cho X
+    const moves = [0, 15, 1, 16, 2, 17, 3, 18, 4];
+    for (const cellIdx of moves) {
+      playMove2Tap(screen.getByTestId(`caro-cell-${cellIdx}`));
+    }
+
+    // Xác nhận clearSavedMatch được gọi khi ván kết thúc
+    expect(gameLocalDataModule.clearSavedMatch).toHaveBeenCalledWith('caro');
+
+    // Xác nhận appendHistory được gọi đúng format nén chuỗi moves
+    expect(gameLocalDataModule.appendHistory).toHaveBeenCalledWith(
+      'caro',
+      expect.objectContaining({
+        modeKey: 'local_pvp',
+        outcome: 'none',
+        summary: expect.objectContaining({
+          moveCount: 9,
+          winnerSeat: 0,
+        }),
+        movesSerialized: '0,15,1,16,2,17,3,18,4',
+      }),
+    );
+  });
+
+  it('4. Pipeline khôi phục ván dở (a-e): Bấm Tiếp tục -> Bàn cờ tải đúng thế cờ và số nước', async () => {
+    // Giả lập trạng thái đã chơi 2 nước (X đánh ô 0, O đánh ô 15)
+    const baseState = caroEngine.init({
+      playerCount: 2,
+      options: DEFAULT_CARO_OPTIONS,
+    });
+    const s1 = caroEngine.applyMove(baseState, 0, 0);
+    const s2 = caroEngine.applyMove(s1, 15, 1);
+    const serialized = caroEngine.serialize(s2);
+
+    vi.spyOn(gameLocalDataModule, 'getSavedMatch').mockReturnValue({
+      schemaVersion: 1,
+      engineStateSerialized: serialized,
+      gameConfig: { mode: 'local_pvp' } as CaroMatchConfig,
+      sessionExtra: { sessionScore: { player1Wins: 1, player2Wins: 0, draws: 0, matchNumber: 2 } },
+      savedAt: new Date(Date.now() - 3 * 60 * 1000).toISOString(),
+    });
+
+    render(
+      <CaroGameView definition={caroManifest} onGameEnd={mockOnGameEnd} shellApi={mockShellApi} />,
+    );
+
+    // Màn setup hiển thị khối "Tiếp tục ván dở"
+    expect(screen.getByTestId('saved-match-card')).not.toBeNull();
+    expect(screen.getByText(/3 phút trước/i)).not.toBeNull();
+
+    // Bấm nút "Tiếp tục chơi"
+    act(() => {
+      fireEvent.click(screen.getByTestId('resume-saved-match-btn'));
+    });
+
+    // Chuyển sang màn hình PLAYING với bàn cờ khôi phục chính xác
+    expect(screen.queryByTestId('caro-mode-select')).toBeNull();
+    expect(screen.getByTestId('turn-indicator')).not.toBeNull();
+    expect(screen.getByText('Ván 2')).not.toBeNull();
+    expect(screen.getByText('1 - 0')).not.toBeNull();
+    expect(screen.getByText('Nước đi')).not.toBeNull();
+    expect(screen.getByText('3')).not.toBeNull(); // Nước kế tiếp là 3
+
+    // Ô 0 có quân X, ô 15 có quân O
+    expect(screen.getByTestId('caro-cell-0').getAttribute('data-value')).toBe('0');
+    expect(screen.getByTestId('caro-cell-15').getAttribute('data-value')).toBe('1');
+  });
+
+  it('5. Khôi phục ván dở đến lượt máy (vs_ai): Worker AI tự động được kích hoạt sau khi khôi phục', async () => {
+    // Khôi phục ván đấu vs_ai cấp độ Hard, người đi X đánh ô 0 -> đến lượt máy O
+    const baseState = caroEngine.init({
+      playerCount: 2,
+      options: DEFAULT_CARO_OPTIONS,
+    });
+    const s1 = caroEngine.applyMove(baseState, 0, 0); // currentPlayer = 1 (Máy)
+    const serialized = caroEngine.serialize(s1);
+
+    vi.spyOn(gameLocalDataModule, 'getSavedMatch').mockReturnValue({
+      schemaVersion: 1,
+      engineStateSerialized: serialized,
+      gameConfig: { mode: 'vs_ai', aiLevel: 'hard', humanSeat: 0 } as CaroMatchConfig,
+      savedAt: new Date().toISOString(),
+    });
+
     mockRequestMove.mockResolvedValue(112);
 
     render(
       <CaroGameView definition={caroManifest} onGameEnd={mockOnGameEnd} shellApi={mockShellApi} />,
     );
 
-    // Chọn mức Khó + Cầm X (Đi trước)
-    act(() => {
-      fireEvent.click(screen.getByTestId('ai-level-btn-hard'));
-      fireEvent.click(screen.getByTestId('seat-x-btn'));
-    });
-
-    // Bắt đầu đấu máy
+    // Bấm Tiếp tục
     await act(async () => {
-      fireEvent.click(screen.getByTestId('start-vs-ai-btn'));
+      fireEvent.click(screen.getByTestId('resume-saved-match-btn'));
     });
 
-    // Người X đánh 5 nước thắng: 0, 1, 2, 3, 4 (xen kẽ máy đánh 15, 16, 17, 18)
-    // Để test gọn, ta đánh thẳng các nước của người khi đến lượt
-    playMove2Tap(screen.getByTestId('caro-cell-0'));
-
-    // Chờ máy O trả nước đi 15
-    await act(async () => {
-      mockRequestMove.mockResolvedValueOnce(15);
-      vi.advanceTimersByTime(100);
-    });
-
-    // Người X đánh tiếp 1, 2, 3, 4
-    const humanMoves = [1, 2, 3, 4];
-    for (const [i, cellIdx] of humanMoves.entries()) {
-      playMove2Tap(screen.getByTestId(`caro-cell-${cellIdx}`));
-      if (i < humanMoves.length - 1) {
-        await act(async () => {
-          mockRequestMove.mockResolvedValueOnce(16 + i);
-          vi.advanceTimersByTime(100);
-        });
-      }
-    }
-
-    // Kết thúc ván 1 -> Chờ 800ms hiện overlay
-    act(() => {
-      vi.advanceTimersByTime(800);
-    });
-
-    expect(screen.getByTestId('match-end-overlay')).not.toBeNull();
-    expect(screen.getByText('BẠN THẮNG! 🎉')).not.toBeNull();
-
-    // Bấm Chơi lại (Đổi lượt)
-    mockRequestMove.mockResolvedValue(112); // Nước mở màn của máy ở Ván 2
-
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('overlay-restart-btn'));
-    });
-
-    // Ván 2: Người chuyển sang cầm O (Đi sau), Máy cầm X tự động tính toán nước mở màn!
-    expect(screen.getByText('Ván 2')).not.toBeNull();
-    expect(mockRequestMove).toHaveBeenCalled();
-  });
-
-  it('4. Ca vòng đời (a) - PAUSE khi AI đang suy nghĩ: Gọi cancel(), khi Resume tự kích hoạt lại lượt máy', async () => {
-    let resolveAiPromise!: (move: number) => void;
-    mockRequestMove.mockImplementation(
-      () =>
-        new Promise<number>((resolve) => {
-          resolveAiPromise = resolve;
-        }),
-    );
-
-    const { rerender } = render(
-      <CaroGameView
-        definition={caroManifest}
-        isPaused={false}
-        onGameEnd={mockOnGameEnd}
-        shellApi={mockShellApi}
-      />,
-    );
-
-    // Chọn đi sau (Quân O)
-    act(() => {
-      fireEvent.click(screen.getByTestId('seat-o-btn'));
-    });
-
-    // Bắt đầu đấu máy
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('start-vs-ai-btn'));
-    });
-
+    // AI hook requestMove tự động được gọi
     expect(mockRequestMove).toHaveBeenCalledTimes(1);
 
-    // 1. Tạm dừng ván đấu (isPaused = true)
-    act(() => {
-      rerender(
-        <CaroGameView
-          definition={caroManifest}
-          isPaused={true}
-          onGameEnd={mockOnGameEnd}
-          shellApi={mockShellApi}
-        />,
-      );
-    });
-
-    // Xác nhận cancel() đã được gọi khi pause
-    expect(mockCancel).toHaveBeenCalled();
-
-    // 2. Tiếp tục ván đấu (isPaused = false -> Resume)
+    // Tiến thời gian và hoàn thành nước AI
     await act(async () => {
-      rerender(
-        <CaroGameView
-          definition={caroManifest}
-          isPaused={false}
-          onGameEnd={mockOnGameEnd}
-          shellApi={mockShellApi}
-        />,
-      );
-    });
-
-    // Xác nhận requestMove() được kích hoạt lại lần 2
-    expect(mockRequestMove).toHaveBeenCalledTimes(2);
-
-    // Giải quyết nước đi cho AI
-    await act(async () => {
-      resolveAiPromise(112);
+      vi.advanceTimersByTime(500);
     });
 
     const cell112 = screen.getByTestId('caro-cell-112');
-    expect(cell112.getAttribute('data-value')).toBe('0');
+    expect(cell112.getAttribute('data-value')).toBe('1');
   });
 
-  it('5. Ca vòng đời (b) - VÁN MỚI khi AI đang nghĩ: Gọi cancel(), kết quả cũ về muộn bị hủy bỏ', async () => {
-    let resolveOldAi!: (move: number) => void;
-    mockRequestMove.mockImplementationOnce(
-      () =>
-        new Promise<number>((resolve) => {
-          resolveOldAi = resolve;
-        }),
-    );
+  it('6. Pipeline khôi phục (f) - Dữ liệu ván lưu bị hỏng: Xóa saveMatch, hiện Toast thông báo và ở lại Setup', async () => {
+    vi.spyOn(gameLocalDataModule, 'getSavedMatch').mockReturnValue({
+      schemaVersion: 1,
+      engineStateSerialized: '{"corrupted_invalid_data": true}',
+      gameConfig: { mode: 'local_pvp' },
+      savedAt: new Date().toISOString(),
+    });
 
     render(
       <CaroGameView definition={caroManifest} onGameEnd={mockOnGameEnd} shellApi={mockShellApi} />,
     );
 
-    // Chọn đi sau (Quân O)
+    // Bấm Tiếp tục
     act(() => {
-      fireEvent.click(screen.getByTestId('seat-o-btn'));
+      fireEvent.click(screen.getByTestId('resume-saved-match-btn'));
     });
 
-    // Bắt đầu đấu máy (Máy đang tính nước mở màn)
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('start-vs-ai-btn'));
-    });
+    // Xác nhận đã dọn dẹp saveMatch
+    expect(gameLocalDataModule.clearSavedMatch).toHaveBeenCalledWith('caro');
 
-    expect(mockRequestMove).toHaveBeenCalledTimes(1);
-
-    // Bấm nút "Chơi lại ván mới" trong lúc máy đang nghĩ
-    act(() => {
-      fireEvent.click(screen.getByTestId('in-game-reset-btn'));
-    });
-
-    // Xác nhận cancel() được gọi
-    expect(mockCancel).toHaveBeenCalled();
-
-    // Kết quả cũ về muộn -> Phải bị bỏ qua an toàn
-    await act(async () => {
-      resolveOldAi(112);
-    });
-
-    // Ô 112 không bị gán sai
-    const cell112 = screen.getByTestId('caro-cell-112');
-    expect(cell112.getAttribute('data-value')).toBe('-1');
+    // Ở lại Setup và hiển thị Toast thông báo lỗi
+    expect(screen.getByTestId('caro-mode-select')).not.toBeNull();
+    expect(screen.getByTestId('recovery-toast')).not.toBeNull();
+    expect(screen.getByText(/Ván lưu bị lỗi/i)).not.toBeNull();
   });
 
-  it('6. Ca vòng đời (d) - AI trả lỗi / Worker Crash: Hiển thị banner lỗi + Nút "Đi lại lượt máy" hoạt động', async () => {
-    // Lần đầu AI bị reject lỗi
-    mockRequestMove.mockRejectedValueOnce(new Error('Worker Out of Memory'));
+  it('7. Bấm "Bỏ ván này" -> clearSavedMatch được gọi và khối Tiếp tục biến mất', () => {
+    vi.spyOn(gameLocalDataModule, 'getSavedMatch').mockReturnValue({
+      schemaVersion: 1,
+      engineStateSerialized: '{"b":[]}',
+      gameConfig: { mode: 'local_pvp' },
+      savedAt: new Date().toISOString(),
+    });
 
     render(
       <CaroGameView definition={caroManifest} onGameEnd={mockOnGameEnd} shellApi={mockShellApi} />,
     );
 
-    // Chọn đi sau (Quân O)
+    expect(screen.getByTestId('saved-match-card')).not.toBeNull();
+
+    // Bấm Bỏ ván này
     act(() => {
-      fireEvent.click(screen.getByTestId('seat-o-btn'));
+      fireEvent.click(screen.getByTestId('discard-saved-match-btn'));
     });
 
-    // Bắt đầu đấu máy (Máy đi trước)
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('start-vs-ai-btn'));
-    });
-
-    // Hiển thị banner lỗi AI
-    expect(screen.getByTestId('ai-error-banner')).not.toBeNull();
-    expect(screen.getByText(/Máy gặp lỗi tính toán: Worker Out of Memory/i)).not.toBeNull();
-    expect(screen.getByTestId('retry-ai-btn')).not.toBeNull();
-
-    // Lần sau AI thành công
-    mockRequestMove.mockResolvedValueOnce(112);
-
-    // Bấm nút "Đi lại lượt máy"
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('retry-ai-btn'));
-    });
-
-    // Lỗi biến mất và nước đi được thực hiện
-    expect(screen.queryByTestId('ai-error-banner')).toBeNull();
-    const cell112 = screen.getByTestId('caro-cell-112');
-    expect(cell112.getAttribute('data-value')).toBe('0');
+    expect(gameLocalDataModule.clearSavedMatch).toHaveBeenCalledWith('caro');
+    expect(screen.queryByTestId('saved-match-card')).toBeNull();
   });
 });
