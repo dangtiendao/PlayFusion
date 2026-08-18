@@ -82,6 +82,25 @@ module.exports = {
         path: '^(src/games|src/pages)',
       },
     },
+
+    // =========================================================================
+    // 6. LUẬT CỔNG THOÁT HIỂM BACKEND: CHỈ src/repositories ĐƯỢC IMPORT SUPABASE
+    // Lý do: Cấm mọi module ngoài src/repositories/ import trực tiếp @supabase/supabase-js
+    // hoặc src/repositories/supabaseClient. Giữ nguyên tắc cổng thoát hiểm để dễ dàng
+    // thay đổi backend mà không sửa đổi UI/Store.
+    // =========================================================================
+    {
+      name: 'only-repositories-can-import-supabase',
+      severity: 'error',
+      comment:
+        'VI PHẠM KIẾN TRÚC (CỔNG THOÁT HIỂM BACKEND): Cấm import @supabase/supabase-js hoặc supabaseClient ngoài thư mục src/repositories/. Toàn bộ truy cập DB/Auth phải bọc qua Repository.',
+      from: {
+        path: '^(src/(?!repositories)|packages)',
+      },
+      to: {
+        path: '(@supabase/supabase-js|src/repositories/supabaseClient)',
+      },
+    },
   ],
   options: {
     doNotFollow: {

@@ -3,27 +3,83 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { SettingsPage } from './SettingsPage';
 import * as gameLocalDataModule from '../core/gameLocalData';
+import * as healthRepoModule from '../repositories/healthRepository';
 
-describe('SettingsPage Component Tests (SettingsPage.tsx - P0.8 & P1.5c)', () => {
+describe('SettingsPage Component Tests (SettingsPage.tsx - P0.8, P1.5c & P2.1a)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(healthRepoModule, 'checkConnection').mockResolvedValue({
+      ok: true,
+      latencyMs: 45,
+      projectRef: 'mock-dev-ref',
+    });
   });
 
-  it('1. Render đầy đủ các nhóm cài đặt: Theme, Âm thanh & Rung, Dữ liệu trò chơi, Phiên bản', () => {
-    render(<SettingsPage />);
+  it('1. Render đầy đủ các nhóm cài đặt: Theme, Âm thanh & Rung, Chẩn đoán, Dữ liệu trò chơi, Phiên bản', async () => {
+    await act(async () => {
+      render(<SettingsPage />);
+    });
 
     expect(screen.getByText(/Giao diện hiển thị \(Theme\)/i)).not.toBeNull();
     expect(screen.getByText(/Âm thanh & Rung phản hồi/i)).not.toBeNull();
+    expect(screen.getByTestId('server-connection-card')).not.toBeNull();
     expect(screen.getByTestId('game-data-settings-section')).not.toBeNull();
     expect(screen.getByText(/Dữ liệu trò chơi cục bộ/i)).not.toBeNull();
     expect(screen.getByText(/Phiên bản Ứng dụng/i)).not.toBeNull();
   });
 
-  it('2. Hiển thị danh sách game có dữ liệu và thực hiện xóa dữ liệu khi xác nhận', () => {
+  it('2. Hiển thị thông tin kết nối Supabase thành công kèm projectRef và độ trễ (P2.1a)', async () => {
+    await act(async () => {
+      render(<SettingsPage />);
+    });
+
+    expect(screen.getByText(/Kết nối máy chủ: OK \(45ms\)/i)).not.toBeNull();
+    expect(screen.getByTestId('project-ref-badge')).not.toBeNull();
+    expect(screen.getByText(/ref: mock-dev-ref/i)).not.toBeNull();
+  });
+
+  it('3. Hiển thị thông báo thất bại khi kết nối Supabase bị lỗi (P2.1a)', async () => {
+    vi.spyOn(healthRepoModule, 'checkConnection').mockResolvedValue({
+      ok: false,
+      latencyMs: 0,
+      projectRef: 'mock-fail-ref',
+      error: 'HTTP 503: Service Unavailable',
+    });
+
+    await act(async () => {
+      render(<SettingsPage />);
+    });
+
+    expect(screen.getByText(/Kết nối máy chủ: Thất bại/i)).not.toBeNull();
+    expect(screen.getByText(/HTTP 503: Service Unavailable/i)).not.toBeNull();
+  });
+
+  it('4. Bấm nút "Đo lại" kích hoạt lại hàm checkConnection', async () => {
+    const checkSpy = vi.spyOn(healthRepoModule, 'checkConnection').mockResolvedValue({
+      ok: true,
+      latencyMs: 30,
+      projectRef: 'mock-dev-ref',
+    });
+
+    await act(async () => {
+      render(<SettingsPage />);
+    });
+
+    const refreshBtn = screen.getByRole('button', { name: /Kiểm tra lại kết nối máy chủ/i });
+    await act(async () => {
+      fireEvent.click(refreshBtn);
+    });
+
+    expect(checkSpy).toHaveBeenCalledTimes(2); // 1 lần mount + 1 lần bấm nút
+  });
+
+  it('5. Hiển thị danh sách game có dữ liệu và thực hiện xóa dữ liệu khi xác nhận', async () => {
     vi.spyOn(gameLocalDataModule, 'hasGameData').mockImplementation((gameId) => gameId === 'caro');
     const clearSpy = vi.spyOn(gameLocalDataModule, 'clearGameData');
 
-    render(<SettingsPage />);
+    await act(async () => {
+      render(<SettingsPage />);
+    });
 
     // Kiểm tra hàng game caro xuất hiện
     expect(screen.getByTestId('game-data-row-caro')).not.toBeNull();
@@ -51,10 +107,12 @@ describe('SettingsPage Component Tests (SettingsPage.tsx - P0.8 & P1.5c)', () =>
     expect(clearSpy).toHaveBeenCalledWith('caro');
   });
 
-  it('3. Hiển thị thông báo khi không có game nào có dữ liệu cục bộ', () => {
+  it('6. Hiển thị thông báo khi không có game nào có dữ liệu cục bộ', async () => {
     vi.spyOn(gameLocalDataModule, 'hasGameData').mockReturnValue(false);
 
-    render(<SettingsPage />);
+    await act(async () => {
+      render(<SettingsPage />);
+    });
 
     expect(screen.getByText(/Hiện chưa có dữ liệu lưu trữ cục bộ nào cần xóa/i)).not.toBeNull();
   });

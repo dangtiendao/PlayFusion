@@ -87,3 +87,37 @@ Mỗi lần `push` hoặc tạo `Pull Request` lên GitHub, workflow [.github/wo
 
 - **SPA Fallback Routing**: Cloudflare Pages tự động hỗ trợ cơ chế Single Page Application (SPA) nguyên bản — mọi request không trùng với static file trong `dist/` sẽ tự động được phục vụ `index.html` với mã HTTP 200.
 - [`public/_headers`](public/_headers): Cấu hình cache `immutable` 1 năm cho assets có hash (`/assets/*`), chống cache cho `/index.html` để cập nhật phiên bản mới tức thì, và các security headers (`X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`).
+
+---
+
+## Backend Supabase & Biến môi trường
+
+Dự án sử dụng **Supabase** (PostgreSQL, Auth, Realtime, Edge Functions) làm Backend-as-a-Service:
+
+### 1. Mô hình 2 Project độc lập (Dev / Prod)
+
+- **`webgamehub-dev`**: Phục vụ phát triển cục bộ (`localhost`) và các bản Preview branch trên Cloudflare Pages.
+- **`webgamehub-prod`**: Phục vụ môi trường chạy thật cho người dùng cuối (Production).
+- _Region khuyến nghị_: `Singapore (ap-southeast-1)` để đạt độ trễ mạng thấp nhất cho người dùng Việt Nam (~20-40ms).
+
+### 2. Cấu hình chạy cục bộ (Local Development)
+
+1. Sao chép file mẫu biến môi trường:
+   ```bash
+   cp .env.example .env.local
+   ```
+2. Mở file `.env.local` và điền URL cùng anon key từ Supabase Dashboard (`webgamehub-dev` -> **Project Settings** -> **API**):
+   ```env
+   VITE_SUPABASE_URL=https://xxxxxxxxxxxxxxxxxxxx.supabase.co
+   VITE_SUPABASE_ANON_KEY=eyJhbGciOi...
+   ```
+3. Khởi động môi trường phát triển:
+   ```bash
+   npm run dev
+   ```
+
+### 3. Nguyên tắc bảo mật cốt lõi
+
+- **`anon` / `public` key**: Khóa công khai an toàn để nhúng vào frontend client nhờ cơ chế phân quyền cấp hàng **Row Level Security (RLS)** trên database.
+- **`service_role` key**: Khóa đặc quyền tối cao bỏ qua RLS. **TUYỆT ĐỐI KHÔNG BAO GIỜ** nhúng vào frontend hay commit lên Git repository.
+- **Quy tắc cổng thoát hiểm (`src/repositories/`)**: Mọi tương tác với Supabase client bắt buộc phải bọc qua tầng Repository (`src/repositories/`). Tuyệt đối cấm các tầng UI/Store/Engine import trực tiếp `@supabase/supabase-js` (được kiểm soát tự động bởi `npm run check:deps`).
