@@ -1,4 +1,4 @@
-import type { GameCategory, GameMode } from '@engines/types';
+import type { GameCategory, GameMode, AiLevel } from '@engines/types';
 
 /**
  * ==============================================================================
@@ -76,6 +76,36 @@ export const MODE_LABELS: Record<GameMode, string> = {
 };
 
 /**
+ * Bảng mô tả ngắn gọn cho từng Chế độ chơi (GameMode).
+ */
+export const MODE_DESCRIPTIONS: Record<GameMode, string> = {
+  solo: 'Luyện tập giải thế cờ và câu đố một mình',
+  vs_ai: 'Thử thách trí tuệ với bot AI 3 cấp độ thông minh',
+  local_pvp: 'Chơi đối kháng 2 người trực tiếp trên cùng một màn hình',
+  online_1v1: 'Ghép trận đối kháng trực tuyến 1 vs 1 tính điểm xếp hạng Elo',
+  online_ffa: 'Tranh tài tự do nhiều người chơi trực tuyến',
+  online_team: 'Hợp tác đồng đội đối đầu theo nhóm',
+};
+
+/**
+ * Bảng ánh xạ Cấp độ AI (AiLevel) sang nhãn tiếng Việt.
+ */
+export const AI_LEVEL_LABELS: Record<AiLevel, string> = {
+  easy: 'Dễ',
+  medium: 'Trung bình',
+  hard: 'Khó',
+};
+
+/**
+ * Bảng mô tả ngắn gọn 1 dòng cho từng Cấp độ AI.
+ */
+export const AI_LEVEL_DESCRIPTIONS: Record<AiLevel, string> = {
+  easy: 'Nước đi nhanh, thỉnh thoảng sơ hở — phù hợp làm quen',
+  medium: 'Biết phòng thủ và tấn công cơ bản — thử thách cân não',
+  hard: 'Tính toán sâu, công thủ toàn diện — độ khó cao nhất',
+};
+
+/**
  * Lấy cấu hình hiển thị của một thể loại game.
  */
 export function getCategoryConfig(category: GameCategory): CategoryVisualConfig {
@@ -94,4 +124,25 @@ export function getCategoryConfig(category: GameCategory): CategoryVisualConfig 
  */
 export function getModeLabel(mode: GameMode): string {
   return MODE_LABELS[mode] ?? mode;
+}
+
+/**
+ * Lấy mô tả tiếng Việt cho một chế độ chơi.
+ */
+export function getModeDescription(mode: GameMode): string {
+  return MODE_DESCRIPTIONS[mode] ?? '';
+}
+
+/**
+ * Lấy nhãn tiếng Việt cho cấp độ AI.
+ */
+export function getAiLevelLabel(level: AiLevel): string {
+  return AI_LEVEL_LABELS[level] ?? level;
+}
+
+/**
+ * Lấy mô tả tiếng Việt cho cấp độ AI.
+ */
+export function getAiLevelDescription(level: AiLevel): string {
+  return AI_LEVEL_DESCRIPTIONS[level] ?? '';
 }
