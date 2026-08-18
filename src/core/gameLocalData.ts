@@ -20,7 +20,7 @@ export type GameDataSection =
   | 'stats' // Thống kê thành tích (tổng trận, thắng, thua, hòa, chuỗi) - P1.5a
   | 'lastConfig' // Cấu hình trận đấu gần nhất để vào nhanh - P1.5a
   | 'savedMatch' // Trạng thái ván chơi dở dang để khôi phục - P1.5b
-  | 'history'; // Lịch sử các ván đấu gần nhất - P1.5c (Khai báo sẵn)
+  | 'history'; // Lịch sử các ván đấu gần nhất - P1.5c
 
 /**
  * Tạo key lưu trữ chuẩn có định danh theo gameId và phân vùng.
@@ -90,12 +90,41 @@ export interface SavedMatch {
   schemaVersion: 1;
   /** Chuỗi trạng thái game engine được serialize thuần túy. Module này không hiểu nội dung */
   engineStateSerialized: string;
-  /** Cấu hình trận đấu (ví dụ CaroMatchConfig). Game tự validate khi đọc */
+  /** Cấu hình trận đấu (ví dụ MatchConfig). Game tự validate khi đọc */
   gameConfig: unknown;
   /** Dữ liệu phụ đi kèm phiên đấu (tỷ số phiên, seed, v.v.). Generic không ràng buộc ngữ nghĩa */
   sessionExtra?: unknown;
   /** Thời điểm lưu ván đấu (ISO string) */
   savedAt: string;
+}
+
+/**
+ * Bản ghi lịch sử một trận đấu đã hoàn thành (P1.5c).
+ */
+export interface LocalMatchRecord {
+  /** Mã định danh duy nhất của bản ghi lịch sử ván đấu (sinh từ timestamp + counter) */
+  id: string;
+  /** Thời điểm kết thúc trận đấu (ISO string) */
+  finishedAt: string;
+  /** Khóa phân nhóm chế độ chơi (do game tự đặt, ví dụ: 'vs_ai:hard', 'local_pvp') */
+  modeKey: string;
+  /** Kết quả ván đấu ghi nhận cho người chơi ('win' | 'loss' | 'draw' | 'none') */
+  outcome: MatchOutcomeType;
+  /** Tóm tắt dữ liệu trận đấu đặc thù theo từng game (game tự định nghĩa và validate) */
+  summary: unknown;
+  /** Chuỗi danh sách nước đi nén (phục vụ Replay Viewer P8.1) */
+  movesSerialized?: string;
+}
+
+/** Bộ đếm cục bộ sinh ID tăng dần duy nhất */
+let historyCounter = 0;
+
+/**
+ * Sinh ID duy nhất cho bản ghi lịch sử không cần thư viện bên ngoài.
+ */
+export function generateHistoryId(): string {
+  historyCounter = (historyCounter + 1) % 10000;
+  return `rec_${Date.now()}_${historyCounter}`;
 }
 
 /**
@@ -159,6 +188,25 @@ function isValidSavedMatch(data: unknown): data is SavedMatch {
     candidate.gameConfig !== undefined &&
     candidate.gameConfig !== null &&
     typeof candidate.savedAt === 'string'
+  );
+}
+
+/**
+ * Kiểm tra tính hợp lệ về cấu trúc của đối tượng LocalMatchRecord (P1.5c).
+ */
+function isValidLocalMatchRecord(data: unknown): data is LocalMatchRecord {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return false;
+  }
+
+  const candidate = data as Record<string, unknown>;
+
+  return (
+    typeof candidate.id === 'string' &&
+    typeof candidate.finishedAt === 'string' &&
+    typeof candidate.modeKey === 'string' &&
+    typeof candidate.outcome === 'string' &&
+    ['win', 'loss', 'draw', 'none'].includes(candidate.outcome as string)
   );
 }
 
@@ -313,6 +361,85 @@ export function getSavedMatch(gameId: string): SavedMatch | null {
 export function clearSavedMatch(gameId: string): void {
   const key = buildGameDataKey(gameId, 'savedMatch');
   storage.removeItem(key);
+}
+
+/**
+ * Đọc danh sách lịch sử các ván đấu đã chơi gần nhất của trò chơi (P1.5c).
+ * Tự động lọc bỏ các phần tử bị lỗi cấu trúc.
+ *
+ * @param gameId Mã định danh trò chơi
+ * @returns Mảng các bản ghi LocalMatchRecord (sắp xếp mới nhất ở đầu)
+ */
+export function getHistory(gameId: string): LocalMatchRecord[] {
+  const key = buildGameDataKey(gameId, 'history');
+  const raw = storage.getItem<unknown>(key, null);
+
+  if (!raw || !Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw.filter(isValidLocalMatchRecord);
+}
+
+/**
+ * Thêm một bản ghi trận đấu vào lịch sử và lưu trữ cục bộ (P1.5c).
+ * Giới hạn tối đa `maxRecords` bản ghi mới nhất (mặc định 20 bản ghi) theo nguyên tắc FIFO.
+ *
+ * Lý do giới hạn trần 20 bản ghi:
+ * - LocalStorage của trình duyệt bị giới hạn dung lượng ~5MB.
+ * - Tuân thủ kỷ luật tiết kiệm tài nguyên bộ nhớ client (như nguyên tắc DB Free Tier).
+ *
+ * @param gameId Mã định danh trò chơi
+ * @param record Thông tin bản ghi trận đấu
+ * @param maxRecords Số lượng bản ghi tối đa được giữ lại (mặc định 20)
+ * @returns Danh sách lịch sử mới nhất sau khi thêm
+ */
+export function appendHistory(
+  gameId: string,
+  record: Omit<LocalMatchRecord, 'id' | 'finishedAt'> & { id?: string; finishedAt?: string },
+  maxRecords = 20,
+): LocalMatchRecord[] {
+  const currentHistory = getHistory(gameId);
+  const newRecord: LocalMatchRecord = {
+    id: record.id ?? generateHistoryId(),
+    finishedAt: record.finishedAt ?? new Date().toISOString(),
+    modeKey: record.modeKey,
+    outcome: record.outcome,
+    summary: record.summary,
+    movesSerialized: record.movesSerialized,
+  };
+
+  // Thêm bản ghi mới nhất lên đầu danh sách và cắt bớt theo trần maxRecords
+  const updatedHistory = [newRecord, ...currentHistory].slice(0, maxRecords);
+  storage.setItem(buildGameDataKey(gameId, 'history'), updatedHistory);
+  return updatedHistory;
+}
+
+/**
+ * Kiểm tra xem một trò chơi có bất kỳ dữ liệu lưu trữ cục bộ nào hay không (P1.5c).
+ * Dùng để render danh sách trong mục Cài đặt -> Xóa dữ liệu game.
+ *
+ * @param gameId Mã định danh trò chơi
+ * @returns true nếu game có ít nhất 1 mục dữ liệu (stats, config, savedMatch, history)
+ */
+export function hasGameData(gameId: string): boolean {
+  const statsKey = buildGameDataKey(gameId, 'stats');
+  const configKey = buildGameDataKey(gameId, 'lastConfig');
+  const savedKey = buildGameDataKey(gameId, 'savedMatch');
+  const historyKey = buildGameDataKey(gameId, 'history');
+
+  const stats = storage.getItem<unknown>(statsKey, null);
+  const config = storage.getItem<unknown>(configKey, null);
+  const saved = storage.getItem<unknown>(savedKey, null);
+  const history = storage.getItem<unknown>(historyKey, null);
+
+  const hasStats =
+    stats !== null && isValidStats(stats) && (stats as GameLocalStats).totalMatches > 0;
+  const hasConfig = config !== null;
+  const hasSaved = saved !== null;
+  const hasHistory = Array.isArray(history) && history.length > 0;
+
+  return hasStats || hasConfig || hasSaved || hasHistory;
 }
 
 /**

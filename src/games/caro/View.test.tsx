@@ -76,6 +76,7 @@ describe('Caro Game View Component, Local Data & Auto-Save Recovery Tests (View.
     vi.spyOn(gameLocalDataModule, 'setLastConfig');
     vi.spyOn(gameLocalDataModule, 'saveMatch');
     vi.spyOn(gameLocalDataModule, 'clearSavedMatch');
+    vi.spyOn(gameLocalDataModule, 'appendHistory');
   });
 
   afterEach(() => {
@@ -123,7 +124,7 @@ describe('Caro Game View Component, Local Data & Auto-Save Recovery Tests (View.
     expect(gameLocalDataModule.saveMatch).toHaveBeenCalledTimes(3);
   });
 
-  it('3. Khi ván đấu kết thúc -> clearSavedMatch được gọi ngay lập tức để dọn dẹp ván dở', async () => {
+  it('3. Khi ván đấu kết thúc -> clearSavedMatch và appendHistory được gọi để lưu lịch sử (P1.5c)', async () => {
     render(
       <CaroGameView definition={caroManifest} onGameEnd={mockOnGameEnd} shellApi={mockShellApi} />,
     );
@@ -141,6 +142,20 @@ describe('Caro Game View Component, Local Data & Auto-Save Recovery Tests (View.
 
     // Xác nhận clearSavedMatch được gọi khi ván kết thúc
     expect(gameLocalDataModule.clearSavedMatch).toHaveBeenCalledWith('caro');
+
+    // Xác nhận appendHistory được gọi đúng format nén chuỗi moves
+    expect(gameLocalDataModule.appendHistory).toHaveBeenCalledWith(
+      'caro',
+      expect.objectContaining({
+        modeKey: 'local_pvp',
+        outcome: 'none',
+        summary: expect.objectContaining({
+          moveCount: 9,
+          winnerSeat: 0,
+        }),
+        movesSerialized: '0,15,1,16,2,17,3,18,4',
+      }),
+    );
   });
 
   it('4. Pipeline khôi phục ván dở (a-e): Bấm Tiếp tục -> Bàn cờ tải đúng thế cờ và số nước', async () => {

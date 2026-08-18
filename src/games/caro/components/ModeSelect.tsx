@@ -16,8 +16,9 @@ import React, { useState, useCallback, useMemo } from 'react';
 import type { GameDefinition, AiLevel, PlayerIndex, GameMode } from '@engines/types';
 import type { GameShellApi } from '../../types';
 import type { CaroMatchConfig } from '../types';
-import type { SavedMatch } from '../../../core/gameLocalData';
+import type { SavedMatch, GameLocalStats, LocalMatchRecord } from '../../../core/gameLocalData';
 import { formatRelativeTime } from '../../../core/text';
+import { GameStatsCard } from './GameStatsCard';
 import {
   getModeLabel,
   getModeDescription,
@@ -36,6 +37,10 @@ export interface ModeSelectProps {
   readonly onDiscardSavedMatch?: () => void;
   /** Cấu hình trận đấu gần nhất đã lưu trong Local Data (nếu có) */
   readonly lastConfig?: CaroMatchConfig | null;
+  /** Bảng thống kê thành tích cục bộ (P1.5c) */
+  readonly stats?: GameLocalStats | null;
+  /** Danh sách lịch sử các ván đấu đã chơi (P1.5c) */
+  readonly history?: readonly LocalMatchRecord[];
   /** Callback bắt đầu ván đấu với cấu hình đã chọn */
   readonly onStart: (config: CaroMatchConfig) => void;
   /** Tiện ích âm thanh và xúc giác từ GameShell */
@@ -50,6 +55,8 @@ export const ModeSelect: React.FC<ModeSelectProps> = ({
   onResumeSavedMatch,
   onDiscardSavedMatch,
   lastConfig,
+  stats,
+  history = [],
   onStart,
   shellApi,
   className = '',
@@ -400,6 +407,13 @@ export const ModeSelect: React.FC<ModeSelectProps> = ({
           </div>
         </div>
       )}
+
+      {/* 
+        ========================================================================
+        3. KHỐI THỐNG KÊ THÀNH TÍCH & LỊCH SỬ VÁN ĐẤU (P1.5c)
+        ========================================================================
+      */}
+      {stats && <GameStatsCard stats={stats} history={history} />}
     </div>
   );
 };

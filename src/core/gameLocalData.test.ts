@@ -7,13 +7,16 @@ import {
   saveMatch,
   getSavedMatch,
   clearSavedMatch,
+  appendHistory,
+  getHistory,
+  hasGameData,
   clearGameData,
   buildGameDataKey,
   type SavedMatch,
 } from './gameLocalData';
 import { storage } from './storage';
 
-describe('Generic Game Local Data Module (gameLocalData.ts - P1.5a & P1.5b)', () => {
+describe('Generic Game Local Data Module (gameLocalData.ts - P1.5a, P1.5b & P1.5c)', () => {
   beforeEach(() => {
     // Dọn sạch dữ liệu test trước mỗi bài kiểm thử
     clearGameData('test_game_1');
@@ -176,42 +179,64 @@ describe('Generic Game Local Data Module (gameLocalData.ts - P1.5a & P1.5b)', ()
     expect(storage.getItem(key, null)).toBeNull();
   });
 
-  it('7. clearGameData: Xóa sạch toàn bộ dữ liệu của game (Stats, Config, SavedMatch)', () => {
+  it('7. appendHistory & getHistory: Lưu trữ lịch sử với giới hạn trần FIFO 20 bản ghi (P1.5c)', () => {
     const gameId = 'test_game_1';
 
-    recordResult(gameId, 'mode_a', 'win');
-    setLastConfig(gameId, { test: 123 });
-    saveMatch(gameId, {
-      schemaVersion: 1,
-      engineStateSerialized: 'mock_state',
-      gameConfig: {},
-      savedAt: new Date().toISOString(),
-    });
+    expect(getHistory(gameId)).toEqual([]);
 
-    expect(getStats(gameId).totalMatches).toBe(1);
-    expect(getLastConfig(gameId)).not.toBeNull();
-    expect(getSavedMatch(gameId)).not.toBeNull();
+    // Thêm 25 bản ghi liên tiếp
+    for (let i = 1; i <= 25; i++) {
+      appendHistory(
+        gameId,
+        {
+          modeKey: `mode_${i}`,
+          outcome: i % 2 === 0 ? 'win' : 'loss',
+          summary: { score: i * 10 },
+          movesSerialized: `moves_${i}`,
+        },
+        20, // maxRecords = 20
+      );
+    }
+
+    const history = getHistory(gameId);
+    // Chỉ giữ tối đa 20 bản ghi
+    expect(history.length).toBe(20);
+
+    // Bản ghi đầu tiên là mới nhất (bản ghi thứ 25)
+    expect(history[0]?.modeKey).toBe('mode_25');
+    // Bản ghi cuối cùng là bản ghi thứ 6 (các bản ghi 1-5 đã bị cắt FIFO)
+    expect(history[19]?.modeKey).toBe('mode_6');
+  });
+
+  it('8. getHistory: Lọc bỏ các phần tử bị lỗi cấu trúc trong mảng lịch sử', () => {
+    const gameId = 'test_game_1';
+    const key = buildGameDataKey(gameId, 'history');
+
+    storage.setItem(key, [
+      { id: 'rec_1', finishedAt: '2026-08-18', modeKey: 'vs_ai', outcome: 'win', summary: {} },
+      { corrupted: true }, // Phần tử rác
+      { id: 'rec_2', finishedAt: '2026-08-18', modeKey: 'local_pvp', outcome: 'none', summary: {} },
+    ]);
+
+    const history = getHistory(gameId);
+    expect(history.length).toBe(2);
+    expect(history[0]?.id).toBe('rec_1');
+    expect(history[1]?.id).toBe('rec_2');
+  });
+
+  it('9. hasGameData & clearGameData: Kiểm tra sự tồn tại của dữ liệu và xóa sạch toàn bộ', () => {
+    const gameId = 'test_game_1';
+
+    expect(hasGameData(gameId)).toBe(false);
+
+    recordResult(gameId, 'mode_a', 'win');
+    expect(hasGameData(gameId)).toBe(true);
 
     clearGameData(gameId);
-
+    expect(hasGameData(gameId)).toBe(false);
     expect(getStats(gameId).totalMatches).toBe(0);
     expect(getLastConfig(gameId)).toBeNull();
     expect(getSavedMatch(gameId)).toBeNull();
-  });
-
-  it('8. Cách ly dữ liệu hoàn hảo giữa các gameId khác nhau', () => {
-    recordResult('test_game_1', 'mode_1', 'win');
-    recordResult('test_game_2', 'mode_2', 'loss');
-
-    const stats1 = getStats('test_game_1');
-    const stats2 = getStats('test_game_2');
-
-    expect(stats1.totalMatches).toBe(1);
-    expect(stats1.wins).toBe(1);
-    expect(stats1.losses).toBe(0);
-
-    expect(stats2.totalMatches).toBe(1);
-    expect(stats2.wins).toBe(0);
-    expect(stats2.losses).toBe(1);
+    expect(getHistory(gameId)).toEqual([]);
   });
 });

@@ -35,8 +35,11 @@ import {
   saveMatch,
   getSavedMatch,
   clearSavedMatch,
+  appendHistory,
+  getHistory,
   type GameLocalStats,
   type SavedMatch,
+  type LocalMatchRecord,
 } from '../../core/gameLocalData';
 
 export const CaroGameView: React.FC<GameViewProps> = ({
@@ -67,7 +70,10 @@ export const CaroGameView: React.FC<GameViewProps> = ({
     getStats('caro'),
   );
 
-  // 7. Tỷ số phiên đấu hiện tại (Session Score - in-memory)
+  // 7. Lịch sử ván đấu đã chơi lưu trong Local Data (P1.5c)
+  const [history, setHistoryState] = useState<LocalMatchRecord[]>(() => getHistory('caro'));
+
+  // 8. Tỷ số phiên đấu hiện tại (Session Score - in-memory)
   const [sessionScore, setSessionScore] = useState<SessionScore>({
     player1Wins: 0,
     player2Wins: 0,
@@ -80,7 +86,10 @@ export const CaroGameView: React.FC<GameViewProps> = ({
     sessionScoreRef.current = sessionScore;
   }, [sessionScore]);
 
-  // 8. Trạng thái bàn cờ Caro Engine thuần
+  // 9. Mảng ghi nhận các nước đi trong ván (dùng nén chuỗi cho History P1.5c & Replay P8.1)
+  const movesRef = useRef<number[]>([]);
+
+  // 10. Trạng thái bàn cờ Caro Engine thuần
   const [gameState, setGameState] = useState<CaroState>(() =>
     caroEngine.init({
       playerCount: 2,
@@ -88,7 +97,7 @@ export const CaroGameView: React.FC<GameViewProps> = ({
     }),
   );
 
-  // 9. State quản lý kết thúc ván đấu
+  // 11. State quản lý kết thúc ván đấu
   const [isGameOver, setIsGameOver] = useState<boolean>(false);
   const [winLine, setWinLine] = useState<number[] | null>(null);
   const [, setWinner] = useState<number | null>(null); // 0: X, 1: O, null: Hòa / Chưa xong
@@ -96,7 +105,7 @@ export const CaroGameView: React.FC<GameViewProps> = ({
   const [aiError, setAiError] = useState<string | null>(null);
   const [latestReport, setLatestReport] = useState<MatchResultReport | null>(null);
 
-  // 10. Seed ngẫu nhiên cố định cho mỗi ván đấu (để tái lập ván cờ khi debug / replay)
+  // 12. Seed ngẫu nhiên cố định cho mỗi ván đấu (để tái lập ván cờ khi debug / replay)
   const matchSeedRef = useRef<string>(`caro_seed_${Date.now()}`);
 
   // 11. Quản lý thời gian để lập MatchResultReport
@@ -120,6 +129,7 @@ export const CaroGameView: React.FC<GameViewProps> = ({
         // 1. Áp dụng nước đi qua Caro Engine thuần
         const nextState = caroEngine.applyMove(gameState, cellIndex, playerIndex);
         setGameState(nextState);
+        movesRef.current.push(cellIndex);
 
         // 2. Phát âm thanh đặt quân (cho cả người và máy)
         shellApi?.playSfx('click');
@@ -184,7 +194,7 @@ export const CaroGameView: React.FC<GameViewProps> = ({
 
           setLatestReport(report);
 
-          // 5. Ghi nhận kết quả vào Tầng dữ liệu Local Data (P1.5a)
+          // 5. Ghi nhận kết quả vào Tầng dữ liệu Local Data (P1.5a & P1.5c)
           const isVsAiMode = matchConfig?.mode === 'vs_ai';
           const currentHumanSeat = matchConfig?.humanSeat ?? 0;
           const modeKey = isVsAiMode ? `vs_ai:${matchConfig.aiLevel ?? 'easy'}` : 'local_pvp';
@@ -201,6 +211,23 @@ export const CaroGameView: React.FC<GameViewProps> = ({
 
           const updatedStats = recordResult('caro', modeKey, outcomeType);
           setAccumulatedStats(updatedStats);
+
+          // Ghi nhận lịch sử ván đấu (P1.5c)
+          const movesSerialized = movesRef.current.join(',');
+          const updatedHistory = appendHistory('caro', {
+            modeKey,
+            outcome: outcomeType,
+            summary: {
+              moveCount: nextState.moveCount,
+              durationMs,
+              winnerSeat: winOutcome?.playerIndex ?? null,
+              humanSeat: isVsAiMode ? currentHumanSeat : undefined,
+              aiLevel: isVsAiMode ? (matchConfig?.aiLevel ?? 'easy') : undefined,
+              seed: matchSeedRef.current,
+            },
+            movesSerialized,
+          });
+          setHistoryState(updatedHistory);
 
           // 6. Cập nhật tỷ số phiên đấu (Session Score - in-memory)
           setSessionScore((prev) => {
@@ -281,6 +308,7 @@ export const CaroGameView: React.FC<GameViewProps> = ({
     clearSavedMatch('caro');
     setSavedMatchState(null);
     setRecoveryToast(null);
+    movesRef.current = [];
 
     // Lưu cấu hình gần nhất vào Local Data (P1.5a)
     setLastConfig('caro', config);
@@ -400,6 +428,7 @@ export const CaroGameView: React.FC<GameViewProps> = ({
     cancel();
     clearSavedMatch('caro');
     setSavedMatchState(null);
+    movesRef.current = [];
 
     setGameState(
       caroEngine.init({
@@ -428,6 +457,7 @@ export const CaroGameView: React.FC<GameViewProps> = ({
     cancel();
     clearSavedMatch('caro');
     setSavedMatchState(null);
+    movesRef.current = [];
 
     // 1. Cập nhật cấu hình đổi bên đi trước
     let nextConfig = matchConfig;
@@ -476,9 +506,12 @@ export const CaroGameView: React.FC<GameViewProps> = ({
     setAiError(null);
     setLatestReport(null);
     reportSentRef.current = false;
-    // Cập nhật lại lastConfig & savedMatch từ Storage khi về setup
+    movesRef.current = [];
+    // Cập nhật lại lastConfig, savedMatch, stats & history từ Storage khi về setup
     setLastConfigState(getLastConfig<CaroMatchConfig>('caro'));
     setSavedMatchState(getSavedMatch('caro'));
+    setAccumulatedStats(getStats('caro'));
+    setHistoryState(getHistory('caro'));
     setScreen('setup');
     shellApi?.playSfx('click');
     shellApi?.hapticTap();
@@ -583,7 +616,7 @@ export const CaroGameView: React.FC<GameViewProps> = ({
   ]);
 
   // ============================================================================
-  // RENDER MÀN HÌNH 1: SETUP (CHỌN CHẾ ĐỘ CHƠI + TIẾP TỤC VÁN DỞ)
+  // RENDER MÀN HÌNH 1: SETUP (CHỌN CHẾ ĐỘ CHƠI + TIẾP TỤC VÁN DỞ + THỐNG KÊ)
   // ============================================================================
   if (screen === 'setup') {
     return (
@@ -602,6 +635,8 @@ export const CaroGameView: React.FC<GameViewProps> = ({
           onResumeSavedMatch={handleResumeSavedMatch}
           onDiscardSavedMatch={handleDiscardSavedMatch}
           lastConfig={lastConfig}
+          stats={accumulatedStats}
+          history={history}
           onStart={handleStartMatch}
           shellApi={shellApi}
         />
