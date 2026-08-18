@@ -16,5 +16,10 @@ describe('Caro Module Index Barrel Export', () => {
     expect(CaroModule.evaluateBoard).toBeTypeOf('function');
     expect(CaroModule.evaluateMove).toBeTypeOf('function');
     expect(CaroModule.generateCandidates).toBeTypeOf('function');
+    expect(CaroModule.AI_LEVELS).toBeDefined();
+    expect(CaroModule.getAiLevelConfig).toBeTypeOf('function');
+    expect(CaroModule.findBestMove).toBeTypeOf('function');
+    expect(CaroModule.createSeededPrng).toBeTypeOf('function');
+    expect(CaroModule.hashStringToSeed).toBeTypeOf('function');
   });
 });
