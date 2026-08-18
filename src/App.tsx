@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { APP_CONFIG } from '@/config/app';
 import { APP_ROUTES } from '@/routes';
@@ -5,12 +6,20 @@ import { AppShell } from '@/components/layout/AppShell';
 import { useTheme } from '@/core/useTheme';
 import { SunIcon, MoonIcon } from '@/components/icons/NavIcons';
 import { UpdatePrompt } from '@/components/pwa/UpdatePrompt';
+import { useAuthStore } from '@/stores/authStore';
 
 /**
  * AppContent Component - Render bên trong BrowserRouter để sử dụng Router hooks.
  */
 function AppContent() {
   const { isDark, toggleTheme } = useTheme();
+
+  // Khởi tạo phiên xác thực (Khách ẩn danh tự động hoặc khôi phục session cũ).
+  // NGUYÊN TẮC OFFLINE-FIRST BẤT BIẾN: auth loading chạy ngầm, tuyệt đối KHÔNG chặn
+  // render giao diện hay làm gián đoạn các trò chơi offline (Caro, Ô ăn quan).
+  useEffect(() => {
+    useAuthStore.getState().init();
+  }, []);
 
   // Lọc các route được phép hiển thị trên thanh điều hướng
   const navItems = APP_ROUTES.filter((route) => route.showInNav);
