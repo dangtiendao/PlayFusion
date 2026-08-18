@@ -1,3 +1,4 @@
+import { caroManifest } from '@engines/caro/manifest';
 import { dummyManifest } from '@engines/dummy/manifest';
 import { dummy2Manifest } from '@engines/dummy2/manifest';
 import { validateGameDefinition, type GameCategory } from '@engines/types';
@@ -26,6 +27,10 @@ import type { RegistryEntry } from './types';
  * Danh sách đăng ký toàn bộ các trò chơi có sẵn trong hệ thống PlayFusion.
  */
 export const GAMES: readonly RegistryEntry[] = [
+  {
+    definition: caroManifest,
+    loadView: () => import('./caro/View'),
+  },
   {
     definition: dummyManifest,
     loadView: () => import('./dummy/View'),
@@ -100,13 +105,13 @@ export function assertRegistryValid(entries: readonly RegistryEntry[] = GAMES): 
 assertRegistryValid(GAMES);
 
 /**
- * Tra cứu một trò chơi cụ thể theo `gameId`.
+ * Tra cứu thông tin cấu hình và hàm nạp giao diện của một trò chơi theo `gameId`.
  *
- * @param id Mã định danh của trò chơi (ví dụ: 'caro', 'dummy').
- * @returns Đối tượng `RegistryEntry` hoặc `undefined` nếu không tìm thấy.
+ * @param id ID duy nhất của trò chơi (ví dụ: 'caro', 'dummy').
+ * @returns `RegistryEntry` tương ứng hoặc `undefined` nếu không tìm thấy.
  */
 export function getGameById(id: string): RegistryEntry | undefined {
-  return GAMES.find((game) => game.definition.id === id);
+  return GAMES.find((entry) => entry.definition.id === id);
 }
 
 /**
