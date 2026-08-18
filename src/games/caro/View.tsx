@@ -4,15 +4,19 @@
  * ==============================================================================
  *
  * ⚠️ KIẾN TRÚC STATE MACHINE GIAO DIỆN:
- * 1. 'setup': Màn hình cấu hình chọn chế độ chơi (`ModeSelect.tsx`), hỗ trợ nút "Chơi ngay ⚡".
+ * 1. 'setup': Màn hình cấu hình chọn chế độ chơi (`ModeSelect.tsx`), hỗ trợ:
+ *    - Khối "Tiếp tục ván dở 💾" (P1.5b) khi có ván lưu hợp lệ.
+ *    - Nút "Chơi ngay ⚡" (P1.5a) theo cấu hình gần nhất.
  * 2. 'playing': Màn hình bàn cờ đang diễn ra trận đấu (`InteractiveBoard.tsx`).
  * 3. 'finished': Màn hình kết thúc ván đấu (`MatchEndOverlay.tsx`) mờ phủ trên bàn cờ.
  *
- * ⚠️ TÍCH HỢP TẦNG DỮ LIỆU CỤC BỘ (GAME LOCAL DATA - P1.5a):
- * - Tự động ghi nhớ cấu hình gần nhất qua `setLastConfig('caro', config)` và `getLastConfig('caro')`.
- * - Tự động ghi nhận thành tích tích lũy vào Local Data qua `recordResult('caro', modeKey, outcome)`:
- *   + vs_ai: Ghi nhận win / loss / draw theo góc nhìn người chơi.
- *   + local_pvp: Ghi nhận tổng số ván ('none' hoặc 'draw'), không tính win/loss cá nhân.
+ * ⚠️ TÍCH HỢP AUTO-SAVE & KHÔI PHỤC VÁN DỞ (P1.5b):
+ * - Auto-save: Sau MỖI nước đi hợp lệ (cả người lẫn máy) khi ván chưa kết thúc.
+ *   + Ghi chú hiệu năng: Trạng thái bàn cờ Caro 15x15 sau khi serialize chỉ ~300 bytes chuỗi JSON nén,
+ *     việc ghi vào storage sau mỗi nước đi là tức thời (<1ms) và hoàn toàn an toàn.
+ *   + Tránh lưu khi AI đang suy nghĩ để loại bỏ nguy cơ khôi phục ra trạng thái "AI nghĩ mãi".
+ * - Xóa save: Ngay khi ván kết thúc (terminal) hoặc khi người chơi bắt đầu ván mới/hủy ván.
+ * - Pipeline khôi phục 6 bước (a-f): Tuyệt đối không có trạng thái nửa vời, hỏng là xóa sạch.
  */
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
@@ -20,7 +24,7 @@ import type { GameViewProps } from '../types';
 import type { MatchResultReport, MatchResultParticipant } from '@engines/types';
 import { caroEngine, DEFAULT_CARO_OPTIONS, checkWinAt, type CaroState } from '@engines/caro';
 import { InteractiveBoard, ModeSelect, MatchEndOverlay, type SessionScore } from './components';
-import type { CaroMatchConfig, CaroScreen } from './types';
+import type { CaroMatchConfig, CaroScreen, CaroSavedSessionExtra } from './types';
 import { getAiLevelLabel } from '../labels';
 import { useCaroAi } from './useCaroAi';
 import {
@@ -28,7 +32,11 @@ import {
   recordResult,
   getLastConfig,
   setLastConfig,
+  saveMatch,
+  getSavedMatch,
+  clearSavedMatch,
   type GameLocalStats,
+  type SavedMatch,
 } from '../../core/gameLocalData';
 
 export const CaroGameView: React.FC<GameViewProps> = ({
@@ -48,12 +56,18 @@ export const CaroGameView: React.FC<GameViewProps> = ({
     getLastConfig<CaroMatchConfig>('caro'),
   );
 
-  // 4. Thống kê tích lũy toàn cục lưu trong Local Data (P1.5a)
+  // 4. Ván đấu dở dang đã lưu trong Local Data (P1.5b)
+  const [savedMatch, setSavedMatchState] = useState<SavedMatch | null>(() => getSavedMatch('caro'));
+
+  // 5. Toast thông báo lỗi khôi phục ván dở (nếu có)
+  const [recoveryToast, setRecoveryToast] = useState<string | null>(null);
+
+  // 6. Thống kê tích lũy toàn cục lưu trong Local Data (P1.5a)
   const [accumulatedStats, setAccumulatedStats] = useState<GameLocalStats | null>(() =>
     getStats('caro'),
   );
 
-  // 5. Tỷ số phiên đấu hiện tại (Session Score - in-memory)
+  // 7. Tỷ số phiên đấu hiện tại (Session Score - in-memory)
   const [sessionScore, setSessionScore] = useState<SessionScore>({
     player1Wins: 0,
     player2Wins: 0,
@@ -61,7 +75,12 @@ export const CaroGameView: React.FC<GameViewProps> = ({
     matchNumber: 1,
   });
 
-  // 6. Trạng thái bàn cờ Caro Engine thuần
+  const sessionScoreRef = useRef(sessionScore);
+  useEffect(() => {
+    sessionScoreRef.current = sessionScore;
+  }, [sessionScore]);
+
+  // 8. Trạng thái bàn cờ Caro Engine thuần
   const [gameState, setGameState] = useState<CaroState>(() =>
     caroEngine.init({
       playerCount: 2,
@@ -69,7 +88,7 @@ export const CaroGameView: React.FC<GameViewProps> = ({
     }),
   );
 
-  // 7. State quản lý kết thúc ván đấu
+  // 9. State quản lý kết thúc ván đấu
   const [isGameOver, setIsGameOver] = useState<boolean>(false);
   const [winLine, setWinLine] = useState<number[] | null>(null);
   const [, setWinner] = useState<number | null>(null); // 0: X, 1: O, null: Hòa / Chưa xong
@@ -77,18 +96,18 @@ export const CaroGameView: React.FC<GameViewProps> = ({
   const [aiError, setAiError] = useState<string | null>(null);
   const [latestReport, setLatestReport] = useState<MatchResultReport | null>(null);
 
-  // 8. Seed ngẫu nhiên cố định cho mỗi ván đấu (để tái lập ván cờ khi debug / replay)
+  // 10. Seed ngẫu nhiên cố định cho mỗi ván đấu (để tái lập ván cờ khi debug / replay)
   const matchSeedRef = useRef<string>(`caro_seed_${Date.now()}`);
 
-  // 9. Quản lý thời gian để lập MatchResultReport
+  // 11. Quản lý thời gian để lập MatchResultReport
   const startTimeRef = useRef<number>(Date.now());
   const reportSentRef = useRef<boolean>(false);
 
-  // 10. Hook quản lý Web Worker AI Cờ Caro
+  // 12. Hook quản lý Web Worker AI Cờ Caro
   const { requestMove, isThinking, cancel } = useCaroAi({ minDelayMs: 500 });
 
   // ============================================================================
-  // HÀM DÙNG CHUNG THỰC THI NƯỚC ĐI (UNIFIED MOVE EXECUTION)
+  // HÀM DÙNG CHUNG THỰC THI NƯỚC ĐI (UNIFIED MOVE EXECUTION + AUTO-SAVE P1.5b)
   // ============================================================================
   const executeMove = useCallback(
     (cellIndex: number, playerIndex: number) => {
@@ -109,6 +128,12 @@ export const CaroGameView: React.FC<GameViewProps> = ({
         const terminalResult = caroEngine.isTerminal(nextState);
 
         if (terminalResult.over) {
+          // ====================================================================
+          // VÁN ĐÃ KẾT THÚC: XÓA SẠCH VÁN LƯU DỞ DANG NGAY LẬP TỨC (P1.5b)
+          // ====================================================================
+          clearSavedMatch('caro');
+          setSavedMatchState(null);
+
           setIsGameOver(true);
           setScreen('finished');
 
@@ -214,6 +239,26 @@ export const CaroGameView: React.FC<GameViewProps> = ({
             reportSentRef.current = true;
             onGameEnd(report);
           }
+        } else {
+          // ====================================================================
+          // VÁN ĐANG DIỄN RA: TỰ ĐỘNG LƯU TRẠNG THÁI VÁN DỞ (AUTO-SAVE P1.5b)
+          // ====================================================================
+          // Chỉ lưu tại thời điểm state ổn định NGAY SAU applyMove (không lưu giữa chừng lúc AI nghĩ)
+          if (matchConfig) {
+            const serialized = caroEngine.serialize(nextState);
+            const sessionExtra: CaroSavedSessionExtra = {
+              sessionScore: sessionScoreRef.current,
+              matchSeed: matchSeedRef.current,
+            };
+
+            saveMatch('caro', {
+              schemaVersion: 1,
+              engineStateSerialized: serialized,
+              gameConfig: matchConfig,
+              sessionExtra,
+              savedAt: new Date().toISOString(),
+            });
+          }
         }
       } catch (err: unknown) {
         // Bắt lỗi EngineError (ô không hợp lệ, sai lượt)
@@ -227,11 +272,16 @@ export const CaroGameView: React.FC<GameViewProps> = ({
   );
 
   // ============================================================================
-  // CÁC HÀM CHUYỂN TRẠNG THÁI (STATE MACHINE TRANSITIONS)
+  // CÁC HÀM CHUYỂN TRẠNG THÁI (STATE MACHINE TRANSITIONS & RECOVERY PIPELINE)
   // ============================================================================
 
   // Bắt đầu ván đấu mới từ ModeSelect (setup -> playing)
   const handleStartMatch = useCallback((config: CaroMatchConfig) => {
+    // Xóa ván dở cũ (nếu có) khi người chơi chủ động bắt đầu ván mới
+    clearSavedMatch('caro');
+    setSavedMatchState(null);
+    setRecoveryToast(null);
+
     // Lưu cấu hình gần nhất vào Local Data (P1.5a)
     setLastConfig('caro', config);
     setLastConfigState(config);
@@ -261,9 +311,96 @@ export const CaroGameView: React.FC<GameViewProps> = ({
     setScreen('playing');
   }, []);
 
+  /**
+   * LUỒNG KHÔI PHỤC VÁN DỞ (PIPELINE A-F - P1.5b)
+   * Toàn bộ pipeline được bọc trong try/catch: Bất kỳ bước a-c nào lỗi -> dọn sạch và báo Toast.
+   */
+  const handleResumeSavedMatch = useCallback(() => {
+    setRecoveryToast(null);
+    const currentSaved = getSavedMatch('caro');
+
+    if (!currentSaved) {
+      setSavedMatchState(null);
+      return;
+    }
+
+    try {
+      // (a) Validate gameConfig đúng cấu trúc CaroMatchConfig và hợp lệ với manifest
+      const cfg = currentSaved.gameConfig as CaroMatchConfig | undefined;
+      if (!cfg || !definition.modes.includes(cfg.mode)) {
+        throw new Error('Cấu hình chế độ chơi không còn tương thích');
+      }
+      if (cfg.mode === 'vs_ai') {
+        const availableAiLevels = definition.aiLevels ?? ['easy', 'medium', 'hard'];
+        if (!cfg.aiLevel || !availableAiLevels.includes(cfg.aiLevel)) {
+          throw new Error('Cấp độ AI không còn được hỗ trợ');
+        }
+      }
+
+      // (b) caroEngine.deserialize(engineStateSerialized) — throw EngineError nếu dữ liệu hỏng
+      const restoredState = caroEngine.deserialize(currentSaved.engineStateSerialized);
+
+      // (c) Đối chiếu chéo: isTerminal(restoredState).over phải là false (ván chưa xong)
+      const terminalCheck = caroEngine.isTerminal(restoredState);
+      if (terminalCheck.over) {
+        throw new Error('Ván cờ đã kết thúc, không thể tiếp tục');
+      }
+
+      // (d) Khôi phục sessionExtra (validate, nếu hỏng thì dùng giá trị an toàn)
+      const extra = currentSaved.sessionExtra as CaroSavedSessionExtra | undefined;
+      if (
+        extra?.sessionScore &&
+        typeof extra.sessionScore.player1Wins === 'number' &&
+        typeof extra.sessionScore.player2Wins === 'number'
+      ) {
+        setSessionScore(extra.sessionScore);
+      }
+      if (extra?.matchSeed && typeof extra.matchSeed === 'string') {
+        matchSeedRef.current = extra.matchSeed;
+      }
+
+      // (e) Khôi phục thành công -> Chuyển sang màn hình PLAYING
+      setMatchConfig(cfg);
+      setGameState(restoredState);
+      setIsGameOver(false);
+      setWinLine(null);
+      setWinner(null);
+      setErrorMessage(null);
+      setAiError(null);
+      setLatestReport(null);
+      startTimeRef.current = Date.now();
+      reportSentRef.current = false;
+      setSavedMatchState(null);
+      setScreen('playing');
+
+      shellApi?.playSfx('click');
+      shellApi?.hapticSuccess();
+    } catch (err: unknown) {
+      // (f) BẤT KỲ bước nào fail -> clearSavedMatch + toast lỗi + ở lại setup bình thường
+      clearSavedMatch('caro');
+      setSavedMatchState(null);
+      const msg = err instanceof Error ? err.message : 'Dữ liệu ván cờ bị hỏng';
+      setRecoveryToast(`⚠️ Ván lưu bị lỗi: ${msg}. Đã tự động dọn dẹp.`);
+      shellApi?.playSfx('error');
+      shellApi?.hapticError();
+    }
+  }, [definition, shellApi]);
+
+  // Hủy bỏ ván dở từ ModeSelect
+  const handleDiscardSavedMatch = useCallback(() => {
+    clearSavedMatch('caro');
+    setSavedMatchState(null);
+    setRecoveryToast(null);
+    shellApi?.playSfx('click');
+    shellApi?.hapticTap();
+  }, [shellApi]);
+
   // Chơi lại ván mới giữ nguyên cấu hình đã chọn (trong lúc đang chơi hoặc nút reset nhanh)
   const handleResetGame = useCallback(() => {
     cancel();
+    clearSavedMatch('caro');
+    setSavedMatchState(null);
+
     setGameState(
       caroEngine.init({
         playerCount: 2,
@@ -289,6 +426,8 @@ export const CaroGameView: React.FC<GameViewProps> = ({
    */
   const handleRestartWithSwap = useCallback(() => {
     cancel();
+    clearSavedMatch('caro');
+    setSavedMatchState(null);
 
     // 1. Cập nhật cấu hình đổi bên đi trước
     let nextConfig = matchConfig;
@@ -337,8 +476,9 @@ export const CaroGameView: React.FC<GameViewProps> = ({
     setAiError(null);
     setLatestReport(null);
     reportSentRef.current = false;
-    // Cập nhật lại lastConfig từ Storage khi về setup
+    // Cập nhật lại lastConfig & savedMatch từ Storage khi về setup
     setLastConfigState(getLastConfig<CaroMatchConfig>('caro'));
+    setSavedMatchState(getSavedMatch('caro'));
     setScreen('setup');
     shellApi?.playSfx('click');
     shellApi?.hapticTap();
@@ -443,16 +583,29 @@ export const CaroGameView: React.FC<GameViewProps> = ({
   ]);
 
   // ============================================================================
-  // RENDER MÀN HÌNH 1: SETUP (CHỌN CHẾ ĐỘ CHƠI)
+  // RENDER MÀN HÌNH 1: SETUP (CHỌN CHẾ ĐỘ CHƠI + TIẾP TỤC VÁN DỞ)
   // ============================================================================
   if (screen === 'setup') {
     return (
-      <ModeSelect
-        definition={definition}
-        lastConfig={lastConfig}
-        onStart={handleStartMatch}
-        shellApi={shellApi}
-      />
+      <div className="w-full flex flex-col items-center">
+        {recoveryToast && (
+          <div
+            data-testid="recovery-toast"
+            className="w-full max-w-md mx-auto mb-3 px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-600 dark:text-amber-300 text-xs text-center font-medium animate-shake"
+          >
+            {recoveryToast}
+          </div>
+        )}
+        <ModeSelect
+          definition={definition}
+          savedMatch={savedMatch}
+          onResumeSavedMatch={handleResumeSavedMatch}
+          onDiscardSavedMatch={handleDiscardSavedMatch}
+          lastConfig={lastConfig}
+          onStart={handleStartMatch}
+          shellApi={shellApi}
+        />
+      </div>
     );
   }
 

@@ -38,6 +38,8 @@ export interface GameShellProps {
   readonly onExit: () => void;
   /** Cờ báo ván đấu đã kết thúc hay chưa (nếu đã kết thúc thì thoát không cần hỏi) */
   readonly isGameCompleted?: boolean;
+  /** Cờ báo trò chơi có hỗ trợ tính năng tự động lưu ván dở (Auto-save) hay không (P1.5b) */
+  readonly hasAutoSave?: boolean;
 }
 
 export const GameShell: React.FC<GameShellProps> = ({
@@ -45,6 +47,7 @@ export const GameShell: React.FC<GameShellProps> = ({
   children,
   onExit,
   isGameCompleted = false,
+  hasAutoSave = false,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -309,7 +312,11 @@ export const GameShell: React.FC<GameShellProps> = ({
       <ConfirmDialog
         isOpen={showExitConfirm}
         title="Xác nhận rời trận đấu?"
-        message="Tiến trình ván đấu hiện tại chưa hoàn thành và sẽ bị hủy bỏ nếu bạn rời đi."
+        message={
+          hasAutoSave
+            ? 'Thoát trận? Ván đang chơi đã được lưu, bạn có thể tiếp tục sau.'
+            : 'Tiến trình ván đấu hiện tại chưa hoàn thành và sẽ bị hủy bỏ nếu bạn rời đi.'
+        }
         confirmText="Rời trận"
         cancelText="Ở lại chơi tiếp"
         onConfirm={handleConfirmExit}

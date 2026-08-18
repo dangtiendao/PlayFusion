@@ -4,13 +4,16 @@ import {
   recordResult,
   getLastConfig,
   setLastConfig,
+  saveMatch,
+  getSavedMatch,
+  clearSavedMatch,
   clearGameData,
   buildGameDataKey,
-  createDefaultStats,
+  type SavedMatch,
 } from './gameLocalData';
 import { storage } from './storage';
 
-describe('Generic Game Local Data Module (gameLocalData.ts - P1.5a)', () => {
+describe('Generic Game Local Data Module (gameLocalData.ts - P1.5a & P1.5b)', () => {
   beforeEach(() => {
     // Dọn sạch dữ liệu test trước mỗi bài kiểm thử
     clearGameData('test_game_1');
@@ -91,7 +94,14 @@ describe('Generic Game Local Data Module (gameLocalData.ts - P1.5a)', () => {
 
     // Khi đọc lại: Tự dọn sạch và trả về default stats
     const stats = getStats(gameId);
-    expect(stats).toEqual(expect.objectContaining(createDefaultStats()));
+    expect(stats.totalMatches).toBe(0);
+    expect(stats.wins).toBe(0);
+    expect(stats.losses).toBe(0);
+    expect(stats.draws).toBe(0);
+    expect(stats.byMode).toEqual({});
+    expect(stats.currentStreak).toBe(0);
+    expect(stats.bestStreak).toBe(0);
+    expect(typeof stats.updatedAt).toBe('string');
   });
 
   it('4. getLastConfig và setLastConfig: Lưu và đọc cấu hình ván đấu generic', () => {
@@ -117,22 +127,79 @@ describe('Generic Game Local Data Module (gameLocalData.ts - P1.5a)', () => {
     expect(loaded).toEqual(testConfig);
   });
 
-  it('5. clearGameData: Xóa sạch toàn bộ dữ liệu của game', () => {
+  it('5. saveMatch, getSavedMatch & clearSavedMatch: Lưu và khôi phục ván dở hợp lệ (P1.5b)', () => {
+    const gameId = 'test_game_1';
+
+    expect(getSavedMatch(gameId)).toBeNull();
+
+    const mockSavedMatch: SavedMatch = {
+      schemaVersion: 1,
+      engineStateSerialized: '{"b":[-1,-1,0,1],"c":0}',
+      gameConfig: { mode: 'vs_ai', level: 'hard' },
+      sessionExtra: { sessionScore: { player1Wins: 2, player2Wins: 1 } },
+      savedAt: new Date().toISOString(),
+    };
+
+    saveMatch(gameId, mockSavedMatch);
+
+    const loaded = getSavedMatch(gameId);
+    expect(loaded).toEqual(mockSavedMatch);
+
+    clearSavedMatch(gameId);
+    expect(getSavedMatch(gameId)).toBeNull();
+  });
+
+  it('6. getSavedMatch: Dữ liệu có schemaVersion lạ hoặc thiếu trường bắt buộc -> Tự động xóa và trả về null', () => {
+    const gameId = 'test_game_1';
+    const key = buildGameDataKey(gameId, 'savedMatch');
+
+    // Trường hợp 1: schemaVersion = 99 (version lạ)
+    storage.setItem(key, {
+      schemaVersion: 99,
+      engineStateSerialized: '{"b":[]}',
+      gameConfig: { mode: 'vs_ai' },
+      savedAt: new Date().toISOString(),
+    });
+
+    expect(getSavedMatch(gameId)).toBeNull();
+    // Đã được dọn sạch khỏi storage
+    expect(storage.getItem(key, null)).toBeNull();
+
+    // Trường hợp 2: Thiếu trường engineStateSerialized
+    storage.setItem(key, {
+      schemaVersion: 1,
+      gameConfig: { mode: 'vs_ai' },
+      savedAt: new Date().toISOString(),
+    });
+
+    expect(getSavedMatch(gameId)).toBeNull();
+    expect(storage.getItem(key, null)).toBeNull();
+  });
+
+  it('7. clearGameData: Xóa sạch toàn bộ dữ liệu của game (Stats, Config, SavedMatch)', () => {
     const gameId = 'test_game_1';
 
     recordResult(gameId, 'mode_a', 'win');
     setLastConfig(gameId, { test: 123 });
+    saveMatch(gameId, {
+      schemaVersion: 1,
+      engineStateSerialized: 'mock_state',
+      gameConfig: {},
+      savedAt: new Date().toISOString(),
+    });
 
     expect(getStats(gameId).totalMatches).toBe(1);
     expect(getLastConfig(gameId)).not.toBeNull();
+    expect(getSavedMatch(gameId)).not.toBeNull();
 
     clearGameData(gameId);
 
     expect(getStats(gameId).totalMatches).toBe(0);
     expect(getLastConfig(gameId)).toBeNull();
+    expect(getSavedMatch(gameId)).toBeNull();
   });
 
-  it('6. Cách ly dữ liệu hoàn hảo giữa các gameId khác nhau', () => {
+  it('8. Cách ly dữ liệu hoàn hảo giữa các gameId khác nhau', () => {
     recordResult('test_game_1', 'mode_1', 'win');
     recordResult('test_game_2', 'mode_2', 'loss');
 

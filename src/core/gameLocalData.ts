@@ -8,7 +8,7 @@
  * 2. Module này KHÔNG import bất kỳ thành phần nào từ `src/games/`.
  * 3. Module này KHÔNG chứa bất kỳ từ khóa nào định danh riêng cho một game cụ thể.
  * 4. Mọi thao tác I/O bắt buộc phải đi qua wrapper an toàn `src/core/storage.ts` (prefix `wgh:v1:`).
- * 5. Tự phục hồi an toàn: Dữ liệu hỏng cấu trúc sẽ được dọn dẹp sạch và trả về giá trị mặc định.
+ * 5. Tự phục hồi an toàn: Dữ liệu hỏng cấu trúc sẽ được dọn dẹp sạch và trả về giá trị mặc định / null.
  */
 
 import { storage } from './storage';
@@ -19,7 +19,7 @@ import { storage } from './storage';
 export type GameDataSection =
   | 'stats' // Thống kê thành tích (tổng trận, thắng, thua, hòa, chuỗi) - P1.5a
   | 'lastConfig' // Cấu hình trận đấu gần nhất để vào nhanh - P1.5a
-  | 'savedMatch' // Trạng thái ván chơi dở dang để khôi phục - P1.5b (Khai báo sẵn)
+  | 'savedMatch' // Trạng thái ván chơi dở dang để khôi phục - P1.5b
   | 'history'; // Lịch sử các ván đấu gần nhất - P1.5c (Khai báo sẵn)
 
 /**
@@ -83,6 +83,22 @@ export interface GameLocalStats {
 export type MatchOutcomeType = 'win' | 'loss' | 'draw' | 'none';
 
 /**
+ * Cấu trúc dữ liệu ván đấu dở dang được tự động lưu cục bộ (P1.5b).
+ */
+export interface SavedMatch {
+  /** Phiên bản schema của dữ liệu ván lưu. Đọc thấy version lạ -> tự động loại bỏ */
+  schemaVersion: 1;
+  /** Chuỗi trạng thái game engine được serialize thuần túy. Module này không hiểu nội dung */
+  engineStateSerialized: string;
+  /** Cấu hình trận đấu (ví dụ CaroMatchConfig). Game tự validate khi đọc */
+  gameConfig: unknown;
+  /** Dữ liệu phụ đi kèm phiên đấu (tỷ số phiên, seed, v.v.). Generic không ràng buộc ngữ nghĩa */
+  sessionExtra?: unknown;
+  /** Thời điểm lưu ván đấu (ISO string) */
+  savedAt: string;
+}
+
+/**
  * Khởi tạo đối tượng thống kê mặc định ban đầu.
  */
 export function createDefaultStats(): GameLocalStats {
@@ -127,6 +143,26 @@ function isValidStats(data: unknown): data is GameLocalStats {
 }
 
 /**
+ * Kiểm tra tính hợp lệ về cấu trúc của đối tượng SavedMatch (P1.5b).
+ */
+function isValidSavedMatch(data: unknown): data is SavedMatch {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return false;
+  }
+
+  const candidate = data as Record<string, unknown>;
+
+  return (
+    candidate.schemaVersion === 1 &&
+    typeof candidate.engineStateSerialized === 'string' &&
+    candidate.engineStateSerialized.length > 0 &&
+    candidate.gameConfig !== undefined &&
+    candidate.gameConfig !== null &&
+    typeof candidate.savedAt === 'string'
+  );
+}
+
+/**
  * Đọc bảng thống kê thành tích của trò chơi từ bộ nhớ cục bộ.
  * Nếu dữ liệu chưa tồn tại hoặc bị hỏng cấu trúc, tự động trả về giá trị mặc định và dọn sạch key lỗi.
  *
@@ -151,12 +187,6 @@ export function getStats(gameId: string): GameLocalStats {
 
 /**
  * Ghi nhận kết quả của một trận đấu vừa kết thúc và cập nhật thống kê tích lũy.
- *
- * Quy tắc tính chuỗi thắng (Streak):
- * - `outcome === 'win'`: Tăng `currentStreak` thêm 1, cập nhật `bestStreak = Math.max(bestStreak, currentStreak)`.
- * - `outcome === 'loss'`: Reset `currentStreak` về 0, giữ nguyên `bestStreak`.
- * - `outcome === 'draw'`: Giữ nguyên `currentStreak` và `bestStreak`.
- * - `outcome === 'none'`: Giữ nguyên `currentStreak` và `bestStreak`.
  *
  * @param gameId Mã định danh trò chơi
  * @param modeKey Khóa phân nhóm chế độ chơi (do game tự đặt, ví dụ: 'vs_ai:hard', 'local_pvp')
@@ -204,11 +234,9 @@ export function recordResult(
     case 'draw':
       stats.draws += 1;
       modeStats.draws += 1;
-      // Chuỗi thắng giữ nguyên khi hòa
       break;
 
     case 'none':
-      // Không ghi nhận thắng/thua/hòa cá nhân cho người chơi
       break;
   }
 
@@ -240,6 +268,51 @@ export function getLastConfig<T>(gameId: string): T | null {
 export function setLastConfig<T>(gameId: string, config: T): void {
   const key = buildGameDataKey(gameId, 'lastConfig');
   storage.setItem(key, config);
+}
+
+/**
+ * Lưu trạng thái ván đấu dở dang (Auto-save) của trò chơi vào Storage (P1.5b).
+ *
+ * @param gameId Mã định danh trò chơi
+ * @param data Đối tượng SavedMatch chứa trạng thái serialize và cấu hình
+ */
+export function saveMatch(gameId: string, data: SavedMatch): void {
+  const key = buildGameDataKey(gameId, 'savedMatch');
+  storage.setItem(key, data);
+}
+
+/**
+ * Lấy trạng thái ván đấu dở dang của trò chơi từ Storage (P1.5b).
+ * Tự động validate schemaVersion và tính toàn vẹn. Nếu sai cấu trúc -> xóa key rác và trả null.
+ *
+ * @param gameId Mã định danh trò chơi
+ * @returns Đối tượng SavedMatch hoặc null nếu không có hoặc bị hỏng
+ */
+export function getSavedMatch(gameId: string): SavedMatch | null {
+  const key = buildGameDataKey(gameId, 'savedMatch');
+  const raw = storage.getItem<unknown>(key, null);
+
+  if (raw === null || raw === undefined) {
+    return null;
+  }
+
+  if (!isValidSavedMatch(raw)) {
+    storage.removeItem(key);
+    return null;
+  }
+
+  return raw;
+}
+
+/**
+ * Xóa trạng thái ván đấu dở dang đã lưu của trò chơi (P1.5b).
+ * Sử dụng khi ván kết thúc, người chơi bấm "Ván mới", hoặc bỏ ván dở.
+ *
+ * @param gameId Mã định danh trò chơi
+ */
+export function clearSavedMatch(gameId: string): void {
+  const key = buildGameDataKey(gameId, 'savedMatch');
+  storage.removeItem(key);
 }
 
 /**

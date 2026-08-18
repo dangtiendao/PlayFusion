@@ -8,13 +8,16 @@
  * 2. Render động từ `GameDefinition` (tờ khai năng lực của game), tuyệt đối KHÔNG hard-code.
  * 3. Mobile-First: Các vùng chạm ≥44px, hỗ trợ hoàn hảo cả Dark Mode và Light Mode.
  * 4. Tương tác âm thanh & xúc giác ĐỀU thông qua `shellApi` được truyền từ View.
- * 5. Tính năng Chơi ngay ⚡: Hiển thị nút vào nhanh nếu có cấu hình gần nhất (`lastConfig`) hợp lệ.
+ * 5. Khối Tiếp tục ván dở 💾 (P1.5b): Hiển thị nổi bật trên cùng nếu phát hiện có ván dở hợp lệ.
+ * 6. Tính năng Chơi ngay ⚡: Hiển thị nút vào nhanh nếu có cấu hình gần nhất (`lastConfig`) hợp lệ.
  */
 
 import React, { useState, useCallback, useMemo } from 'react';
 import type { GameDefinition, AiLevel, PlayerIndex, GameMode } from '@engines/types';
 import type { GameShellApi } from '../../types';
 import type { CaroMatchConfig } from '../types';
+import type { SavedMatch } from '../../../core/gameLocalData';
+import { formatRelativeTime } from '../../../core/text';
 import {
   getModeLabel,
   getModeDescription,
@@ -25,6 +28,12 @@ import {
 export interface ModeSelectProps {
   /** Tờ khai năng lực của game chứa danh sách modes và aiLevels được hỗ trợ */
   readonly definition: GameDefinition;
+  /** Ván đấu dở dang đã được auto-save (nếu có - P1.5b) */
+  readonly savedMatch?: SavedMatch | null;
+  /** Callback khôi phục ván đấu dở dang */
+  readonly onResumeSavedMatch?: () => void;
+  /** Callback hủy bỏ ván đấu dở dang */
+  readonly onDiscardSavedMatch?: () => void;
   /** Cấu hình trận đấu gần nhất đã lưu trong Local Data (nếu có) */
   readonly lastConfig?: CaroMatchConfig | null;
   /** Callback bắt đầu ván đấu với cấu hình đã chọn */
@@ -37,6 +46,9 @@ export interface ModeSelectProps {
 
 export const ModeSelect: React.FC<ModeSelectProps> = ({
   definition,
+  savedMatch,
+  onResumeSavedMatch,
+  onDiscardSavedMatch,
   lastConfig,
   onStart,
   shellApi,
@@ -67,6 +79,9 @@ export const ModeSelect: React.FC<ModeSelectProps> = ({
     }
     return true;
   }, [lastConfig, availableModes, availableAiLevels]);
+
+  // Cấu hình của ván dở dang (nếu có)
+  const savedConfig = savedMatch?.gameConfig as CaroMatchConfig | undefined;
 
   // State cấu hình trước khi vào trận
   const [selectedMode, setSelectedMode] = useState<'vs_ai' | 'local_pvp'>(() => {
@@ -126,10 +141,72 @@ export const ModeSelect: React.FC<ModeSelectProps> = ({
 
       {/* 
         ========================================================================
+        KHỐI TIẾP TỤC VÁN DỞ 💾 (NỔI BẬT TRÊN CÙNG KHI CÓ AUTO-SAVE - P1.5b)
+        ========================================================================
+      */}
+      {savedMatch && onResumeSavedMatch && (
+        <div
+          data-testid="saved-match-card"
+          className="w-full p-4 rounded-2xl bg-gradient-to-r from-emerald-500/15 via-cyan-500/15 to-blue-500/15 border border-emerald-500/40 dark:border-emerald-400/40 shadow-lg shadow-emerald-500/10 space-y-3"
+        >
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-2.5">
+              <span className="text-2xl animate-pulse">💾</span>
+              <div>
+                <h3 className="text-sm font-black text-emerald-600 dark:text-emerald-300 flex items-center gap-1.5">
+                  Tiếp tục ván dở
+                  <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-md bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                    Đang chờ
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-700 dark:text-slate-200 font-medium">
+                  {savedConfig?.mode === 'vs_ai'
+                    ? `Đấu máy • ${getAiLevelLabel(savedConfig.aiLevel ?? 'easy')} • ${savedConfig.humanSeat === 1 ? 'Bạn cầm O (Đi sau)' : 'Bạn cầm X (Đi trước)'}`
+                    : '2 người 1 máy (Đối kháng)'}
+                </p>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Đã lưu: {formatRelativeTime(savedMatch.savedAt)}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <button
+              type="button"
+              data-testid="resume-saved-match-btn"
+              onClick={() => {
+                shellApi?.playSfx('click');
+                shellApi?.hapticTap();
+                onResumeSavedMatch();
+              }}
+              className="min-h-[44px] py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-bold text-xs shadow-md shadow-emerald-500/20 active:scale-95 transition-all flex items-center justify-center gap-1.5"
+            >
+              <span>▶️ Tiếp tục chơi</span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="discard-saved-match-btn"
+              onClick={() => {
+                shellApi?.playSfx('click');
+                shellApi?.hapticTap();
+                onDiscardSavedMatch?.();
+              }}
+              className="min-h-[44px] py-2.5 px-3 rounded-xl bg-slate-200 dark:bg-slate-800 hover:bg-rose-500/20 hover:border-rose-500/40 hover:text-rose-500 border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-bold text-xs active:scale-95 transition-all flex items-center justify-center gap-1.5"
+            >
+              <span>🗑️ Bỏ ván này</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 
+        ========================================================================
         NÚT CHƠI NGAY ⚡ (NẾU CÓ CẤU HÌNH GẦN NHẤT HỢP LỆ - P1.5a)
         ========================================================================
       */}
-      {isLastConfigValid && lastConfig && (
+      {isLastConfigValid && lastConfig && !savedMatch && (
         <div className="w-full">
           <button
             type="button"

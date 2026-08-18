@@ -6,10 +6,13 @@ import { caroManifest } from '@engines/caro/manifest';
 import type { GameDefinition, AiLevel } from '@engines/types';
 import type { GameShellApi } from '../../types';
 import type { CaroMatchConfig } from '../types';
+import type { SavedMatch } from '../../../core/gameLocalData';
 
-describe('Caro ModeSelect Component (ModeSelect.tsx - P1.5a)', () => {
+describe('Caro ModeSelect Component (ModeSelect.tsx - P1.5a & P1.5b)', () => {
   let mockShellApi: GameShellApi;
   let mockOnStart: ReturnType<typeof vi.fn>;
+  let mockOnResumeSavedMatch: ReturnType<typeof vi.fn>;
+  let mockOnDiscardSavedMatch: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -20,6 +23,8 @@ describe('Caro ModeSelect Component (ModeSelect.tsx - P1.5a)', () => {
       hapticError: vi.fn(),
     };
     mockOnStart = vi.fn();
+    mockOnResumeSavedMatch = vi.fn();
+    mockOnDiscardSavedMatch = vi.fn();
   });
 
   it('1. Render đầy đủ các chế độ và cấp độ AI từ caroManifest', () => {
@@ -149,5 +154,68 @@ describe('Caro ModeSelect Component (ModeSelect.tsx - P1.5a)', () => {
     );
 
     expect(screen.queryByTestId('quick-play-btn')).toBeNull();
+  });
+
+  it('7. Khối Tiếp tục ván dở 💾: Hiển thị Card khi có savedMatch, bấm "Tiếp tục" gọi onResumeSavedMatch', () => {
+    const mockSavedMatch: SavedMatch = {
+      schemaVersion: 1,
+      engineStateSerialized: '{"b":[-1,-1,0,1]}',
+      gameConfig: { mode: 'vs_ai', aiLevel: 'hard', humanSeat: 1 },
+      savedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    };
+
+    render(
+      <ModeSelect
+        definition={caroManifest}
+        savedMatch={mockSavedMatch}
+        onResumeSavedMatch={mockOnResumeSavedMatch}
+        onDiscardSavedMatch={mockOnDiscardSavedMatch}
+        onStart={mockOnStart}
+        shellApi={mockShellApi}
+      />,
+    );
+
+    expect(screen.getByTestId('saved-match-card')).not.toBeNull();
+    expect(screen.getByText(/Tiếp tục ván dở/i)).not.toBeNull();
+    expect(screen.getByText(/Đấu máy • Khó • Bạn cầm O/i)).not.toBeNull();
+    expect(screen.getByText(/5 phút trước/i)).not.toBeNull();
+
+    const resumeBtn = screen.getByTestId('resume-saved-match-btn');
+    act(() => {
+      fireEvent.click(resumeBtn);
+    });
+
+    expect(mockShellApi.playSfx).toHaveBeenCalledWith('click');
+    expect(mockShellApi.hapticTap).toHaveBeenCalled();
+    expect(mockOnResumeSavedMatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('8. Khối Tiếp tục ván dở 💾: Bấm "Bỏ ván này" gọi onDiscardSavedMatch', () => {
+    const mockSavedMatch: SavedMatch = {
+      schemaVersion: 1,
+      engineStateSerialized: '{"b":[-1,-1,0,1]}',
+      gameConfig: { mode: 'local_pvp' },
+      savedAt: new Date().toISOString(),
+    };
+
+    render(
+      <ModeSelect
+        definition={caroManifest}
+        savedMatch={mockSavedMatch}
+        onResumeSavedMatch={mockOnResumeSavedMatch}
+        onDiscardSavedMatch={mockOnDiscardSavedMatch}
+        onStart={mockOnStart}
+        shellApi={mockShellApi}
+      />,
+    );
+
+    const discardBtn = screen.getByTestId('discard-saved-match-btn');
+    act(() => {
+      fireEvent.click(discardBtn);
+    });
+
+    expect(mockShellApi.playSfx).toHaveBeenCalledWith('click');
+    expect(mockShellApi.hapticTap).toHaveBeenCalled();
+    expect(mockOnDiscardSavedMatch).toHaveBeenCalledTimes(1);
   });
 });

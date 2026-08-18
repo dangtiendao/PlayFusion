@@ -67,6 +67,11 @@ describe('GameShell Component Tests (src/components/game-shell/GameShell.tsx)', 
 
     // Xác nhận Confirm Dialog xuất hiện và CHƯA gọi onExit
     expect(screen.getByText('Xác nhận rời trận đấu?')).toBeDefined();
+    expect(
+      screen.getByText(
+        'Tiến trình ván đấu hiện tại chưa hoàn thành và sẽ bị hủy bỏ nếu bạn rời đi.',
+      ),
+    ).toBeDefined();
     expect(onExitMock).not.toHaveBeenCalled();
 
     // Bấm "Ở lại chơi tiếp"
@@ -100,17 +105,34 @@ describe('GameShell Component Tests (src/components/game-shell/GameShell.tsx)', 
     expect(onExitMock).toHaveBeenCalledTimes(1);
   });
 
-  it('5. Đồng bộ Mute toggle với settingsStore', () => {
+  it('5. Phím tắt ESC: Kích hoạt Pause hoặc đóng modal xác nhận', () => {
     render(
       <GameShell definition={dummyManifest} onExit={vi.fn()}>
         <div>Game Content</div>
       </GameShell>,
     );
 
-    expect(useSettingsStore.getState().soundEnabled).toBe(true);
-    const muteBtn = screen.getByRole('button', { name: /Tắt âm thanh/i });
-    fireEvent.click(muteBtn);
+    // Nhấn Escape lần 1 -> Bật Pause
+    fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+    expect(useGameSessionStore.getState().isPaused).toBe(true);
 
-    expect(useSettingsStore.getState().soundEnabled).toBe(false);
+    // Nhấn Escape lần 2 -> Tắt Pause (Resume)
+    fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+    expect(useGameSessionStore.getState().isPaused).toBe(false);
+  });
+
+  it('6. Hiển thị thông điệp có auto-save khi hasAutoSave = true trong ConfirmDialog (P1.5b)', () => {
+    render(
+      <GameShell definition={dummyManifest} onExit={vi.fn()} hasAutoSave={true}>
+        <div>Game Content</div>
+      </GameShell>,
+    );
+
+    const backBtn = screen.getByRole('button', { name: /Quay lại Sảnh trò chơi/i });
+    fireEvent.click(backBtn);
+
+    expect(
+      screen.getByText('Thoát trận? Ván đang chơi đã được lưu, bạn có thể tiếp tục sau.'),
+    ).toBeDefined();
   });
 });
