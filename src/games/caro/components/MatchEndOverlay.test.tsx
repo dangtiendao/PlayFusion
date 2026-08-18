@@ -4,8 +4,9 @@ import { render, screen, fireEvent, act } from '@testing-library/react';
 import { MatchEndOverlay, type SessionScore } from './MatchEndOverlay';
 import type { MatchResultReport } from '@engines/types';
 import type { GameShellApi } from '../../types';
+import type { GameLocalStats } from '../../../core/gameLocalData';
 
-describe('MatchEndOverlay Component Tests (MatchEndOverlay.tsx - P1.4c)', () => {
+describe('MatchEndOverlay Component Tests (MatchEndOverlay.tsx - P1.5a)', () => {
   let mockShellApi: GameShellApi;
   let mockOnRestart: ReturnType<typeof vi.fn>;
   let mockOnBackToSetup: ReturnType<typeof vi.fn>;
@@ -223,5 +224,52 @@ describe('MatchEndOverlay Component Tests (MatchEndOverlay.tsx - P1.4c)', () => 
       fireEvent.click(screen.getByTestId('overlay-exit-btn'));
     });
     expect(mockOnExit).toHaveBeenCalledTimes(1);
+  });
+
+  it('6. Hiển thị bảng tổng tích lũy thành tích dài hạn (accumulatedStats)', () => {
+    const mockReport: MatchResultReport = {
+      gameId: 'caro',
+      mode: 'vs_ai',
+      durationMs: 30000,
+      participants: [
+        { playerIndex: 0, outcome: 'win' },
+        { playerIndex: 1, outcome: 'loss' },
+      ],
+    };
+
+    const mockAccumulatedStats: GameLocalStats = {
+      totalMatches: 10,
+      wins: 7,
+      losses: 2,
+      draws: 1,
+      byMode: {
+        'vs_ai:hard': { matches: 8, wins: 6, losses: 1, draws: 1 },
+      },
+      currentStreak: 4,
+      bestStreak: 5,
+      updatedAt: new Date().toISOString(),
+    };
+
+    render(
+      <MatchEndOverlay
+        report={mockReport}
+        matchConfig={{ mode: 'vs_ai', aiLevel: 'hard', humanSeat: 0 }}
+        moveCount={15}
+        sessionScore={defaultSessionScore}
+        accumulatedStats={mockAccumulatedStats}
+        onRestart={mockOnRestart}
+        onBackToSetup={mockOnBackToSetup}
+        onExit={mockOnExit}
+        shellApi={mockShellApi}
+      />,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+
+    expect(screen.getByTestId('accumulated-stats-card')).not.toBeNull();
+    expect(screen.getByText(/6/)).not.toBeNull();
+    expect(screen.getByText(/Chuỗi 4/)).not.toBeNull();
   });
 });

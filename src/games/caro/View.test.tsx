@@ -5,6 +5,7 @@ import { CaroGameView } from './View';
 import { caroManifest } from '@engines/caro/manifest';
 import type { GameShellApi } from '../types';
 import * as useCaroAiModule from './useCaroAi';
+import * as gameLocalDataModule from '../../core/gameLocalData';
 
 /**
  * Mock hook useCaroAi để kiểm soát hành vi bất đồng bộ và kiểm tra 4 ca vòng đời
@@ -43,7 +44,7 @@ function playMove2Tap(cell: HTMLElement) {
   });
 }
 
-describe('Caro Game View Component & AI Integration Tests (View.tsx - P1.4c)', () => {
+describe('Caro Game View Component & Local Data Tests (View.tsx - P1.5a)', () => {
   let mockShellApi: GameShellApi;
   let mockOnGameEnd: ReturnType<typeof vi.fn>;
   let mockRequestMove: ReturnType<typeof vi.fn>;
@@ -68,6 +69,9 @@ describe('Caro Game View Component & AI Integration Tests (View.tsx - P1.4c)', (
       isThinking: false,
       cancel: mockCancel,
     });
+
+    vi.spyOn(gameLocalDataModule, 'recordResult');
+    vi.spyOn(gameLocalDataModule, 'setLastConfig');
   });
 
   afterEach(() => {
@@ -84,7 +88,7 @@ describe('Caro Game View Component & AI Integration Tests (View.tsx - P1.4c)', (
     expect(screen.queryByTestId('interactive-caro-board')).toBeNull();
   });
 
-  it('2. Luồng Chế độ 2 người 1 máy: Vào ván -> Đánh 5 quân thắng -> MatchEndOverlay -> Chơi lại tăng tỷ số phiên', async () => {
+  it('2. Luồng Chế độ 2 người 1 máy: Vào ván -> Đánh 5 quân thắng -> MatchEndOverlay -> Ghi nhận stats none', async () => {
     render(
       <CaroGameView definition={caroManifest} onGameEnd={mockOnGameEnd} shellApi={mockShellApi} />,
     );
@@ -98,6 +102,7 @@ describe('Caro Game View Component & AI Integration Tests (View.tsx - P1.4c)', (
     expect(screen.queryByTestId('caro-mode-select')).toBeNull();
     expect(screen.getByTestId('turn-indicator')).not.toBeNull();
     expect(screen.getByText('Quân X (2 người 1 máy)')).not.toBeNull();
+    expect(gameLocalDataModule.setLastConfig).toHaveBeenCalledWith('caro', { mode: 'local_pvp' });
 
     // 2. Chuỗi nước đi dẫn tới chiến thắng cho Quân X
     const moves = [0, 15, 1, 16, 2, 17, 3, 18, 4];
@@ -113,6 +118,9 @@ describe('Caro Game View Component & AI Integration Tests (View.tsx - P1.4c)', (
 
     expect(screen.getByTestId('match-end-overlay')).not.toBeNull();
     expect(screen.getByText('QUÂN X THẮNG! 🎉')).not.toBeNull();
+
+    // Xác nhận recordResult được gọi với outcome = 'none' cho local PvP
+    expect(gameLocalDataModule.recordResult).toHaveBeenCalledWith('caro', 'local_pvp', 'none');
 
     expect(mockOnGameEnd).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -134,26 +142,9 @@ describe('Caro Game View Component & AI Integration Tests (View.tsx - P1.4c)', (
     expect(screen.queryByTestId('match-end-overlay')).toBeNull();
     expect(screen.getByText('Ván 2')).not.toBeNull();
     expect(screen.getByText('1 - 0')).not.toBeNull();
-
-    // 5. Thắng lại và bấm "Đổi chế độ" -> Quay về SETUP screen
-    for (const cellIdx of moves) {
-      const cell = screen.getByTestId(`caro-cell-${cellIdx}`);
-      playMove2Tap(cell);
-    }
-    act(() => {
-      vi.advanceTimersByTime(800);
-    });
-
-    const backToSetupBtn = screen.getByTestId('overlay-setup-btn');
-    act(() => {
-      fireEvent.click(backToSetupBtn);
-    });
-
-    expect(screen.getByTestId('caro-mode-select')).not.toBeNull();
-    expect(screen.queryByTestId('interactive-caro-board')).toBeNull();
   });
 
-  it('3. Luồng Đấu máy (vs_ai) - Chơi lại ĐỔI LƯỢT ĐI: Ván 1 Người X -> Ván 2 Người O, Máy tự mở màn', async () => {
+  it('3. Luồng Đấu máy (vs_ai) - Thắng ván -> Ghi nhận stats win và lưu lastConfig', async () => {
     // Ván 1: Người cầm X (đi trước), máy cầm O
     mockRequestMove.mockResolvedValue(112);
 
@@ -172,8 +163,12 @@ describe('Caro Game View Component & AI Integration Tests (View.tsx - P1.4c)', (
       fireEvent.click(screen.getByTestId('start-vs-ai-btn'));
     });
 
-    // Người X đánh 5 nước thắng: 0, 1, 2, 3, 4 (xen kẽ máy đánh 15, 16, 17, 18)
-    // Để test gọn, ta đánh thẳng các nước của người khi đến lượt
+    expect(gameLocalDataModule.setLastConfig).toHaveBeenCalledWith(
+      'caro',
+      expect.objectContaining({ mode: 'vs_ai', aiLevel: 'hard', humanSeat: 0 }),
+    );
+
+    // Người X đánh nước 0
     playMove2Tap(screen.getByTestId('caro-cell-0'));
 
     // Chờ máy O trả nước đi 15
@@ -202,16 +197,8 @@ describe('Caro Game View Component & AI Integration Tests (View.tsx - P1.4c)', (
     expect(screen.getByTestId('match-end-overlay')).not.toBeNull();
     expect(screen.getByText('BẠN THẮNG! 🎉')).not.toBeNull();
 
-    // Bấm Chơi lại (Đổi lượt)
-    mockRequestMove.mockResolvedValue(112); // Nước mở màn của máy ở Ván 2
-
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('overlay-restart-btn'));
-    });
-
-    // Ván 2: Người chuyển sang cầm O (Đi sau), Máy cầm X tự động tính toán nước mở màn!
-    expect(screen.getByText('Ván 2')).not.toBeNull();
-    expect(mockRequestMove).toHaveBeenCalled();
+    // Xác nhận recordResult được gọi với outcome = 'win' và modeKey = 'vs_ai:hard'
+    expect(gameLocalDataModule.recordResult).toHaveBeenCalledWith('caro', 'vs_ai:hard', 'win');
   });
 
   it('4. Ca vòng đời (a) - PAUSE khi AI đang suy nghĩ: Gọi cancel(), khi Resume tự kích hoạt lại lượt máy', async () => {

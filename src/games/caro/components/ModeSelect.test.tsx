@@ -3,10 +3,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { ModeSelect } from './ModeSelect';
 import { caroManifest } from '@engines/caro/manifest';
-import type { GameDefinition } from '@engines/types';
+import type { GameDefinition, AiLevel } from '@engines/types';
 import type { GameShellApi } from '../../types';
+import type { CaroMatchConfig } from '../types';
 
-describe('Caro ModeSelect Component (ModeSelect.tsx - P1.4a)', () => {
+describe('Caro ModeSelect Component (ModeSelect.tsx - P1.5a)', () => {
   let mockShellApi: GameShellApi;
   let mockOnStart: ReturnType<typeof vi.fn>;
 
@@ -100,5 +101,53 @@ describe('Caro ModeSelect Component (ModeSelect.tsx - P1.4a)', () => {
       aiLevel: 'hard',
       humanSeat: 1,
     });
+  });
+
+  it('5. Tính năng Chơi ngay ⚡: Khi có lastConfig hợp lệ -> Hiển thị nút Chơi ngay, bấm vào bắt đầu đúng cấu hình', () => {
+    const mockLastConfig: CaroMatchConfig = {
+      mode: 'vs_ai',
+      aiLevel: 'hard',
+      humanSeat: 1,
+    };
+
+    render(
+      <ModeSelect
+        definition={caroManifest}
+        lastConfig={mockLastConfig}
+        onStart={mockOnStart}
+        shellApi={mockShellApi}
+      />,
+    );
+
+    const quickPlayBtn = screen.getByTestId('quick-play-btn');
+    expect(quickPlayBtn).not.toBeNull();
+    expect(screen.getByText(/Chơi ngay/i)).not.toBeNull();
+    expect(screen.getByText(/Đấu máy • Khó • Bạn cầm O/i)).not.toBeNull();
+
+    act(() => {
+      fireEvent.click(quickPlayBtn);
+    });
+
+    expect(mockShellApi.playSfx).toHaveBeenCalledWith('click');
+    expect(mockShellApi.hapticTap).toHaveBeenCalled();
+    expect(mockOnStart).toHaveBeenCalledWith(mockLastConfig);
+  });
+
+  it('6. Khi lastConfig không hợp lệ (ví dụ: aiLevel không nằm trong manifest) -> Ẩn nút Chơi ngay', () => {
+    const invalidConfig: CaroMatchConfig = {
+      mode: 'vs_ai',
+      aiLevel: 'invalid_level' as unknown as AiLevel,
+    };
+
+    render(
+      <ModeSelect
+        definition={caroManifest}
+        lastConfig={invalidConfig}
+        onStart={mockOnStart}
+        shellApi={mockShellApi}
+      />,
+    );
+
+    expect(screen.queryByTestId('quick-play-btn')).toBeNull();
   });
 });

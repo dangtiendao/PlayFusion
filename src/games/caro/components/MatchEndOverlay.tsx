@@ -11,13 +11,14 @@
  *    - Giúp người chơi có 0.8s chiêm ngưỡng nước cờ quyết định trên bàn trước khi overlay xuất hiện.
  * 3. Confetti CSS thuần nhẹ (~25 dòng):
  *    - Tự động bung pháo giấy khi người chơi chiến thắng, tự động tắt khi bật `prefers-reduced-motion`.
- * 4. Tỷ số phiên đấu (Session Score) & Nút Chơi lại đổi lượt.
+ * 4. Tỷ số phiên đấu (Session Score) & Thống kê tích lũy dài hạn (Accumulated Stats - P1.5a).
  */
 
 import React, { useState, useEffect } from 'react';
 import type { MatchResultReport } from '@engines/types';
 import type { GameShellApi } from '../../types';
 import type { CaroMatchConfig } from '../types';
+import type { GameLocalStats } from '../../../core/gameLocalData';
 import { getAiLevelLabel } from '../../labels';
 
 export interface SessionScore {
@@ -38,8 +39,10 @@ export interface MatchEndOverlayProps {
   readonly matchConfig: CaroMatchConfig;
   /** Tổng số nước đi trong ván */
   readonly moveCount: number;
-  /** Tỷ số và thống kê phiên chơi hiện tại */
+  /** Tỷ số và thống kê phiên chơi hiện tại (in-memory) */
   readonly sessionScore?: SessionScore;
+  /** Thống kê tích lũy toàn cục lưu trong Local Data (P1.5a) */
+  readonly accumulatedStats?: GameLocalStats | null;
   /** Callback chơi lại ván mới (kèm đảo lượt đi trước) */
   readonly onRestart: () => void;
   /** Callback quay lại màn hình chọn chế độ */
@@ -60,6 +63,7 @@ export const MatchEndOverlay: React.FC<MatchEndOverlayProps> = ({
   matchConfig,
   moveCount,
   sessionScore,
+  accumulatedStats,
   onRestart,
   onBackToSetup,
   onExit,
@@ -139,6 +143,10 @@ export const MatchEndOverlay: React.FC<MatchEndOverlayProps> = ({
     }
   }
 
+  // Thống kê phân nhóm theo chế độ hiện tại
+  const currentModeKey = isVsAi ? `vs_ai:${matchConfig.aiLevel ?? 'easy'}` : 'local_pvp';
+  const currentModeStats = accumulatedStats?.byMode[currentModeKey];
+
   return (
     <div
       data-testid="match-end-overlay"
@@ -181,7 +189,7 @@ export const MatchEndOverlay: React.FC<MatchEndOverlayProps> = ({
       {/* Card Trung Tâm Kết Quả */}
       <div
         data-testid="match-end-card"
-        className={`relative w-full max-w-sm rounded-3xl bg-slate-900 border p-5 sm:p-6 shadow-2xl space-y-5 text-center animate-scale-in bg-gradient-to-b ${bannerColorClass}`}
+        className={`relative w-full max-w-sm rounded-3xl bg-slate-900 border p-5 sm:p-6 shadow-2xl space-y-4 text-center animate-scale-in bg-gradient-to-b ${bannerColorClass}`}
       >
         {/* Icon & Tiêu đề */}
         <div className="space-y-2">
@@ -210,7 +218,7 @@ export const MatchEndOverlay: React.FC<MatchEndOverlayProps> = ({
         {sessionScore && (
           <div
             data-testid="session-score-card"
-            className="w-full py-2.5 px-3.5 rounded-2xl bg-slate-950/70 border border-slate-800/80 text-xs flex items-center justify-between"
+            className="w-full py-2 px-3.5 rounded-2xl bg-slate-950/70 border border-slate-800/80 text-xs flex items-center justify-between"
           >
             <span className="text-slate-400 font-medium">
               Ván {sessionScore.matchNumber} trong phiên
@@ -229,6 +237,35 @@ export const MatchEndOverlay: React.FC<MatchEndOverlayProps> = ({
                 </span>
               )}
             </div>
+          </div>
+        )}
+
+        {/* 
+          ======================================================================
+          TỔNG TÍCH LŨY DÀI HẠN (ACCUMULATED STATS - P1.5a)
+          ======================================================================
+        */}
+        {accumulatedStats && (
+          <div
+            data-testid="accumulated-stats-card"
+            className="w-full py-1.5 px-3 rounded-xl bg-slate-950/50 border border-slate-800/60 text-[11px] text-slate-300 text-center"
+          >
+            {isVsAi ? (
+              <span>
+                📊 Tổng: <strong>{currentModeStats?.wins ?? 0}</strong> thắng •{' '}
+                <strong>{currentModeStats?.losses ?? 0}</strong> thua •{' '}
+                <strong>{currentModeStats?.draws ?? 0}</strong> hòa
+                {accumulatedStats.currentStreak > 1 && (
+                  <span className="ml-1.5 text-amber-300 font-bold">
+                    (Chuỗi {accumulatedStats.currentStreak} 🔥)
+                  </span>
+                )}
+              </span>
+            ) : (
+              <span>
+                📊 Tổng số ván 2 người: <strong>{currentModeStats?.matches ?? 0}</strong> ván
+              </span>
+            )}
           </div>
         )}
 
