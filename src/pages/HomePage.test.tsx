@@ -36,13 +36,13 @@ describe('HomePage Dynamic Game Hub Tests (src/pages/HomePage.tsx)', () => {
     renderHomePage();
     const searchInput = screen.getByRole('textbox', { name: /Tìm kiếm trò chơi/i });
 
-    // Tìm bằng từ khóa tiếng Việt không dấu 'kiem chung' (khớp với mô tả của dummy)
+    // Tìm bằng từ khóa tiếng Việt không dấu 'co caro' (khớp với 'Cờ Caro')
+    fireEvent.change(searchInput, { target: { value: 'co caro' } });
+    expect(screen.getByText('Cờ Caro')).toBeDefined();
+
+    // Tìm bằng từ khóa tiếng Việt không dấu 'kiem chung' (khớp với mô tả của dummy game)
     fireEvent.change(searchInput, { target: { value: 'kiem chung' } });
-    const games = getAllGames();
-    const firstGame = games[0];
-    if (firstGame) {
-      expect(screen.getByText(firstGame.definition.name)).toBeDefined();
-    }
+    expect(screen.getByText('Dummy Test Game')).toBeDefined();
   });
 
   it('3. Hiển thị Empty State khi tìm kiếm không có kết quả', () => {
@@ -58,19 +58,24 @@ describe('HomePage Dynamic Game Hub Tests (src/pages/HomePage.tsx)', () => {
     // Bấm nút xóa bộ lọc -> Khôi phục danh sách
     const clearBtn = screen.getByRole('button', { name: /Xóa bộ lọc & Hiển thị tất cả/i });
     fireEvent.click(clearBtn);
-
-    const games = getAllGames();
-    const firstGame = games[0];
-    if (firstGame) {
-      expect(screen.getByText(firstGame.definition.name)).toBeDefined();
-    }
+    expect(screen.getByText('Cờ Caro')).toBeDefined();
   });
 
   it('4. Lọc theo Category Chips', () => {
     renderHomePage();
 
-    // Bấm chip Tất cả
-    const allChip = screen.getByRole('tab', { name: /Tất cả/i });
-    expect(allChip).toBeDefined();
+    // Bấm chọn tab 'Giải đố' (Puzzle)
+    const puzzleTab = screen.getByRole('tab', { name: /Giải đố/i });
+    fireEvent.click(puzzleTab);
+
+    // Chỉ hiển thị dummy2 (Puzzle), không hiển thị game Board
+    expect(screen.getByText('Dummy 2 Puzzle')).toBeDefined();
+    expect(screen.queryByText('Cờ Caro')).toBeNull();
+
+    // Bấm 'Tất cả' -> Hiển thị lại toàn bộ
+    const allTab = screen.getByRole('tab', { name: /Tất cả/i });
+    fireEvent.click(allTab);
+    expect(screen.getByText('Cờ Caro')).toBeDefined();
+    expect(screen.getByText('Dummy 2 Puzzle')).toBeDefined();
   });
 });
