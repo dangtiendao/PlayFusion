@@ -3,30 +3,38 @@
  * CARO GAME VIEW COMPONENT (GIAO DIỆN TRÒ CHƠI CỜ CARO CHÍNH THỨC)
  * ==============================================================================
  *
- * ⚠️ RANH GIỚI KIẾN TRÚC & QUY ƯỚC:
- * 1. Nhận `GameViewProps` từ GameShell (`definition`, `isPaused`, `onGameEnd`, `shellApi`).
- * 2. Sử dụng `caroEngine` thuần để quản lý luật cờ và tính toán trạng thái ván đấu.
- * 3. Tương tác bàn cờ qua `InteractiveBoard` (Zoom-Pan-Pinch, cơ chế 2 chạm, haptics).
- * 4. Mọi hiệu ứng âm thanh và rung phản hồi ĐỀU đi qua `shellApi` để đảm bảo testability.
+ * ⚠️ KIẾN TRÚC STATE MACHINE GIAO DIỆN (UI SCREEN STATE MACHINE):
+ * 1. 'setup': Màn hình cấu hình chọn chế độ chơi (`ModeSelect.tsx`).
+ * 2. 'playing': Màn hình bàn cờ đang diễn ra trận đấu (`InteractiveBoard.tsx`).
+ * 3. 'finished': Màn hình kết thúc ván đấu (hiển thị kết quả, ván mới, đổi chế độ).
  *
- * ⚠️ ĐIỂM ĐÁNH DẤU CHO PHASE P1.4:
- * [TẠM P1.3c — P1.4 sẽ thay bằng luồng chọn chế độ solo / vs AI / 2 người]:
- * Hiện tại View vận hành ở chế độ "2 Người 1 Máy" (Local Pass & Play) để kiểm chứng
- * trọn vẹn toàn bộ luồng chơi game thật trong GameShell.
+ * ⚠️ RANH GIỚI KIẾN TRÚC & QUY ƯỚC:
+ * - Nhận `GameViewProps` từ GameShell (`definition`, `isPaused`, `onGameEnd`, `shellApi`).
+ * - Sử dụng `caroEngine` thuần để quản lý luật cờ và tính toán trạng thái ván đấu.
+ * - Mọi hiệu ứng âm thanh và rung phản hồi ĐỀU đi qua `shellApi` để đảm bảo testability.
  */
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import type { GameViewProps } from '../types';
 import type { MatchResultReport, MatchResultParticipant } from '@engines/types';
 import { caroEngine, DEFAULT_CARO_OPTIONS, checkWinAt, type CaroState } from '@engines/caro';
-import { InteractiveBoard } from './components';
+import { InteractiveBoard, ModeSelect } from './components';
+import type { CaroMatchConfig, CaroScreen } from './types';
+import { getAiLevelLabel } from '../labels';
 
 export const CaroGameView: React.FC<GameViewProps> = ({
+  definition,
   isPaused = false,
   onGameEnd,
   shellApi,
 }) => {
-  // 1. Khởi tạo trạng thái bàn cờ ban đầu từ Caro Engine (2 người, 15x15, luật Việt Nam chặn 2 đầu)
+  // 1. Quản lý trạng thái màn hình (State Machine: 'setup' | 'playing' | 'finished')
+  const [screen, setScreen] = useState<CaroScreen>('setup');
+
+  // 2. Cấu hình trận đấu được chọn từ màn hình setup
+  const [matchConfig, setMatchConfig] = useState<CaroMatchConfig | null>(null);
+
+  // 3. Trạng thái bàn cờ Caro Engine thuần
   const [gameState, setGameState] = useState<CaroState>(() =>
     caroEngine.init({
       playerCount: 2,
@@ -34,17 +42,39 @@ export const CaroGameView: React.FC<GameViewProps> = ({
     }),
   );
 
-  // 2. State quản lý kết thúc ván đấu
+  // 4. State quản lý kết thúc ván đấu
   const [isGameOver, setIsGameOver] = useState<boolean>(false);
   const [winLine, setWinLine] = useState<number[] | null>(null);
   const [winner, setWinner] = useState<number | null>(null); // 0: X, 1: O, null: Hòa / Chưa xong
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // 3. Quản lý thời gian để lập MatchResultReport
+  // 5. Quản lý thời gian để lập MatchResultReport
   const startTimeRef = useRef<number>(Date.now());
   const reportSentRef = useRef<boolean>(false);
 
-  // Reset ván đấu mới
+  // ============================================================================
+  // CÁC HÀM CHUYỂN TRẠNG THÁI (STATE MACHINE TRANSITIONS)
+  // ============================================================================
+
+  // Bắt đầu ván đấu mới từ ModeSelect (setup -> playing)
+  const handleStartMatch = useCallback((config: CaroMatchConfig) => {
+    setMatchConfig(config);
+    setGameState(
+      caroEngine.init({
+        playerCount: 2,
+        options: DEFAULT_CARO_OPTIONS,
+      }),
+    );
+    setIsGameOver(false);
+    setWinLine(null);
+    setWinner(null);
+    setErrorMessage(null);
+    startTimeRef.current = Date.now();
+    reportSentRef.current = false;
+    setScreen('playing');
+  }, []);
+
+  // Chơi lại ván mới giữ nguyên cấu hình đã chọn (finished -> playing)
   const handleResetGame = useCallback(() => {
     setGameState(
       caroEngine.init({
@@ -58,10 +88,27 @@ export const CaroGameView: React.FC<GameViewProps> = ({
     setErrorMessage(null);
     startTimeRef.current = Date.now();
     reportSentRef.current = false;
+    setScreen('playing');
+    shellApi?.playSfx('click');
     shellApi?.hapticTap();
   }, [shellApi]);
 
-  // Luồng xử lý khi người chơi xác nhận đánh 1 nước cờ
+  // Quay lại màn hình chọn chế độ chơi (finished -> setup)
+  const handleBackToSetup = useCallback(() => {
+    setMatchConfig(null);
+    setIsGameOver(false);
+    setWinLine(null);
+    setWinner(null);
+    setErrorMessage(null);
+    reportSentRef.current = false;
+    setScreen('setup');
+    shellApi?.playSfx('click');
+    shellApi?.hapticTap();
+  }, [shellApi]);
+
+  // ============================================================================
+  // LUỒNG XỬ LÝ NƯỚC ĐI (MOVE HANDLER)
+  // ============================================================================
   const handleMoveConfirmed = useCallback(
     (cellIndex: number) => {
       if (isPaused || isGameOver) return;
@@ -80,6 +127,7 @@ export const CaroGameView: React.FC<GameViewProps> = ({
 
         if (terminalResult.over) {
           setIsGameOver(true);
+          setScreen('finished');
 
           const winOutcome = terminalResult.outcomes?.find((o) => o.outcome === 'win');
 
@@ -128,7 +176,7 @@ export const CaroGameView: React.FC<GameViewProps> = ({
 
             const report: MatchResultReport = {
               gameId: 'caro',
-              mode: 'local_pvp',
+              mode: matchConfig?.mode ?? 'local_pvp',
               participants,
               durationMs,
             };
@@ -147,10 +195,48 @@ export const CaroGameView: React.FC<GameViewProps> = ({
         shellApi?.playSfx('error');
       }
     },
-    [isPaused, isGameOver, gameState, onGameEnd, shellApi],
+    [isPaused, isGameOver, gameState, matchConfig, onGameEnd, shellApi],
   );
 
-  const isBoardDisabled = isPaused || isGameOver;
+  // ============================================================================
+  // XỬ LÝ LƯỢT ĐI CỦA BOT AI (VS_AI MODE)
+  // ============================================================================
+  const isVsAi = matchConfig?.mode === 'vs_ai';
+  const humanSeat = matchConfig?.humanSeat ?? 0;
+  const isAiTurn = isVsAi && gameState.currentPlayer !== humanSeat;
+
+  useEffect(() => {
+    // Chỉ kích hoạt khi đang trong màn hình playing, ván chưa kết thúc, không bị pause và đúng lượt máy
+    if (screen !== 'playing' || isGameOver || isPaused || !isAiTurn) {
+      return;
+    }
+
+    /**
+     * [P1.4b]: Tại Phase P1.4b sẽ thay thế stub này bằng lời gọi useCaroAi() qua Web Worker.
+     * Stub tạm thời: Tự động đánh nước đi hợp lệ đầu tiên sau 500ms để kiểm thử state machine.
+     */
+    const timer = setTimeout(() => {
+      const legalMoves = caroEngine.legalMoves(gameState, gameState.currentPlayer);
+      const stubMove = legalMoves[0];
+      if (stubMove !== undefined) {
+        handleMoveConfirmed(stubMove);
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [screen, isGameOver, isPaused, isAiTurn, gameState, handleMoveConfirmed]);
+
+  // ============================================================================
+  // RENDER MÀN HÌNH 1: SETUP (CHỌN CHẾ ĐỘ CHƠI)
+  // ============================================================================
+  if (screen === 'setup') {
+    return <ModeSelect definition={definition} onStart={handleStartMatch} shellApi={shellApi} />;
+  }
+
+  // ============================================================================
+  // RENDER MÀN HÌNH 2 & 3: PLAYING & FINISHED
+  // ============================================================================
+  const isBoardDisabled = isPaused || isGameOver || isAiTurn;
 
   return (
     <div
@@ -159,12 +245,11 @@ export const CaroGameView: React.FC<GameViewProps> = ({
     >
       {/* 
         ========================================================================
-        BANNER TRẠNG THÁI LƯỢT ĐÁNH / THÔNG BÁO KẾT QUẢ
-        [TẠM P1.3c — P1.4 sẽ thay bằng Header đấu AI / Solo / 2 Người chuyên nghiệp]
+        BANNER THÔNG TIN LƯỢT ĐÁNH (NÂNG CẤP THEO TỪNG CHẾ ĐỘ)
         ========================================================================
       */}
       <div className="w-full flex flex-col items-center gap-1.5 mb-2">
-        {!isGameOver ? (
+        {screen === 'playing' ? (
           <div
             data-testid="turn-indicator"
             className="flex items-center justify-between w-full px-4 py-2 rounded-2xl bg-slate-900/80 border border-slate-800 backdrop-blur-md shadow-lg"
@@ -188,7 +273,17 @@ export const CaroGameView: React.FC<GameViewProps> = ({
                     gameState.currentPlayer === 0 ? 'text-cyan-400' : 'text-rose-400'
                   }`}
                 >
-                  Quân {gameState.currentPlayer === 0 ? 'X' : 'O'} (Đấu 2 người)
+                  {isVsAi ? (
+                    isAiTurn ? (
+                      <span className="flex items-center gap-1 animate-pulse">
+                        🤖 Máy đang suy nghĩ... ({getAiLevelLabel(matchConfig.aiLevel ?? 'easy')})
+                      </span>
+                    ) : (
+                      `Lượt của bạn (Quân ${gameState.currentPlayer === 0 ? 'X' : 'O'})`
+                    )
+                  ) : (
+                    `Quân ${gameState.currentPlayer === 0 ? 'X' : 'O'} (2 người 1 máy)`
+                  )}
                 </span>
               </div>
             </div>
@@ -199,7 +294,7 @@ export const CaroGameView: React.FC<GameViewProps> = ({
             </div>
           </div>
         ) : (
-          /* Banner Kết Thúc Ván Đấu */
+          /* Banner Kết Thúc Ván Đấu (Finished Screen Banner) */
           <div
             data-testid="game-over-banner"
             className={`flex items-center justify-between w-full px-4 py-2.5 rounded-2xl border backdrop-blur-md shadow-xl animate-scale-in ${
@@ -214,17 +309,23 @@ export const CaroGameView: React.FC<GameViewProps> = ({
               <span className="text-xl">🏆</span>
               <div>
                 <h3 className="text-base font-extrabold">
-                  {winner === 0
-                    ? '🎉 QUÂN X CHIẾN THẮNG!'
-                    : winner === 1
-                      ? '🎉 QUÂN O CHIẾN THẮNG!'
-                      : '🤝 VÁN ĐẤU HÒA!'}
+                  {isVsAi
+                    ? winner === humanSeat
+                      ? '🎉 BẠN ĐÃ CHIẾN THẮNG!'
+                      : winner !== null
+                        ? '🤖 MÁY ĐÃ CHIẾN THẮNG!'
+                        : '🤝 VÁN ĐẤU HÒA!'
+                    : winner === 0
+                      ? '🎉 QUÂN X CHIẾN THẮNG!'
+                      : winner === 1
+                        ? '🎉 QUÂN O CHIẾN THẮNG!'
+                        : '🤝 VÁN ĐẤU HÒA!'}
                 </h3>
                 <p className="text-xs opacity-80">Sau {gameState.moveCount} nước cờ kịch tính</p>
               </div>
             </div>
 
-            {/* Nút Ván Mới Tối Giản (P1.4 sẽ thay bằng Modal/Màn hình kết thúc hoàn chỉnh) */}
+            {/* Nút Ván Mới Tối Giản */}
             <button
               type="button"
               data-testid="new-game-btn"
@@ -265,18 +366,29 @@ export const CaroGameView: React.FC<GameViewProps> = ({
 
       {/* 
         ========================================================================
-        FOOTER TIỆN ÍCH TỐI GIẢN KHI KẾT THÚC VÁN
+        FOOTER ĐIỀU HƯỚNG KHI KẾT THÚC VÁN (FINISHED SCREEN ACTIONS)
+        [P1.4c]: Màn hình kết thúc đẹp mắt và thống kê chi tiết sẽ được xây dựng tại P1.4c
         ========================================================================
       */}
-      {isGameOver && (
+      {screen === 'finished' && (
         <div
           data-testid="game-over-actions"
           className="flex items-center justify-center gap-3 w-full max-w-sm mt-3 pt-2 border-t border-slate-800/80"
         >
           <button
             type="button"
+            data-testid="back-to-setup-btn"
+            onClick={handleBackToSetup}
+            className="flex-1 h-11 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs sm:text-sm border border-slate-700 shadow-md active:scale-98 transition-all"
+          >
+            Đổi chế độ
+          </button>
+
+          <button
+            type="button"
+            data-testid="restart-game-btn"
             onClick={handleResetGame}
-            className="flex-1 h-11 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-sm shadow-lg shadow-cyan-500/20 active:scale-98 transition-all"
+            className="flex-1 h-11 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs sm:text-sm shadow-lg shadow-cyan-500/20 active:scale-98 transition-all"
           >
             Chơi lại ván mới
           </button>
