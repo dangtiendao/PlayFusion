@@ -4,43 +4,7 @@ import { idx } from './board';
 import type { CaroOptions } from './types';
 import { DEFAULT_CARO_OPTIONS } from './types';
 
-/**
- * Helper trực quan: Khởi tạo mảng board 1D từ mảng chuỗi ASCII.
- * Ký tự: 'x'/'X' = 0, 'o'/'O' = 1, '.'/'-' = -1 (trống).
- */
-function createBoardFromAscii(rows: readonly string[], size: number): number[] {
-  const board = new Array<number>(size * size).fill(-1);
-  for (let y = 0; y < rows.length && y < size; y++) {
-    const rawRow = rows[y] ?? '';
-    const chars = rawRow.includes(' ') ? rawRow.trim().split(/\s+/) : rawRow.split('');
-    for (let x = 0; x < chars.length && x < size; x++) {
-      const ch = chars[x];
-      const cellIdx = y * size + x;
-      if (ch === 'x' || ch === 'X') {
-        board[cellIdx] = 0;
-      } else if (ch === 'o' || ch === 'O') {
-        board[cellIdx] = 1;
-      } else {
-        board[cellIdx] = -1;
-      }
-    }
-  }
-  return board;
-}
-
-/**
- * PRNG Mulberry32 với Seed cố định (100% Deterministic, không Math.random).
- */
-function createPrng(seed: number) {
-  let s = seed;
-  return function next() {
-    s |= 0;
-    s = (s + 0x6d2b79f5) | 0;
-    let t = Math.imul(s ^ (s >>> 15), 1 | s);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+import { createBoardFromAscii, createPrng } from './test-utils';
 
 describe('Caro Win Check Logic (P1.1c)', () => {
   const defaultOptions: CaroOptions = DEFAULT_CARO_OPTIONS; // boardSize 15, winLength 5, blockedTwoEnds true, allowOverline true
