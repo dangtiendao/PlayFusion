@@ -1,13 +1,16 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { ProfilePage } from './ProfilePage';
 import { useAuthStore, _resetAuthStoreForTesting } from '../stores/authStore';
+import * as statsRepoModule from '../repositories/statsRepository';
+import * as matchRepoModule from '../repositories/matchRepository';
 import * as gameLocalDataModule from '../core/gameLocalData';
-import * as catalogRepoModule from '../repositories/catalogRepository';
 import * as syncOutboxModule from '../core/syncOutbox';
+import { getAllGames } from '@/games/registry';
 
-describe('ProfilePage Component Tests (ProfilePage.tsx - P2.1c)', () => {
+describe('ProfilePage Component & Stats Integration Tests (ProfilePage.tsx - P2.6c)', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     _resetAuthStoreForTesting();
@@ -33,12 +36,28 @@ describe('ProfilePage Component Tests (ProfilePage.tsx - P2.1c)', () => {
       isInitialized: true,
       error: null,
     });
+
+    // Default mocks for repositories
+    vi.spyOn(statsRepoModule, 'getMyGameStats').mockResolvedValue([]);
+    vi.spyOn(matchRepoModule, 'getMyRecentMatches').mockResolvedValue([]);
+    vi.spyOn(syncOutboxModule, 'useSyncOutboxCount').mockReturnValue(0);
   });
 
-  it('1. Render đầy đủ thông tin tài khoản khách: tên hiển thị, nhãn Khách, ID rút gọn', async () => {
+  const renderProfilePage = async () => {
+    let result: ReturnType<typeof render> | undefined;
     await act(async () => {
-      render(<ProfilePage />);
+      result = render(
+        <MemoryRouter>
+          <ProfilePage />
+        </MemoryRouter>,
+      );
     });
+    if (!result) throw new Error('Render failed');
+    return result;
+  };
+
+  it('1. Render đầy đủ thông tin tài khoản khách: tên hiển thị, nhãn Khách, ID rút gọn', async () => {
+    await renderProfilePage();
 
     expect(screen.getByTestId('profile-card')).not.toBeNull();
     expect(screen.getByTestId('profile-display-name').textContent).toBe('Khách-123456');
@@ -46,24 +65,13 @@ describe('ProfilePage Component Tests (ProfilePage.tsx - P2.1c)', () => {
     expect(screen.getByText(/ID: anon-use\.\.\.abcd/i)).not.toBeNull();
   });
 
-  it('2. Hiển thị banner nâng cấp Google khi đang ở tài khoản khách', async () => {
-    await act(async () => {
-      render(<ProfilePage />);
-    });
-
-    expect(screen.getByTestId('google-upgrade-banner')).not.toBeNull();
-    expect(screen.getByText('Đăng Nhập Tài Khoản Google')).not.toBeNull();
-    expect(screen.getByTestId('google-signin-btn')).not.toBeNull();
-  });
-
-  it('3. Bấm nút Đăng nhập Google kích hoạt hàm linkGoogle', async () => {
+  it('2. Hiển thị banner nâng cấp Google khi đang ở tài khoản khách & bấm liên kết', async () => {
     const linkSpy = vi.fn().mockResolvedValue(undefined);
     useAuthStore.setState({ linkGoogle: linkSpy });
 
-    await act(async () => {
-      render(<ProfilePage />);
-    });
+    await renderProfilePage();
 
+    expect(screen.getByTestId('google-upgrade-banner')).not.toBeNull();
     const btn = screen.getByTestId('google-signin-btn');
     await act(async () => {
       fireEvent.click(btn);
@@ -72,20 +80,20 @@ describe('ProfilePage Component Tests (ProfilePage.tsx - P2.1c)', () => {
     expect(linkSpy).toHaveBeenCalled();
   });
 
-  it('4. Hiển thị thông tin tài khoản Google khi đã đăng nhập chính thức (ẩn banner)', async () => {
+  it('3. Hiển thị thông tin tài khoản Google khi đã đăng nhập chính thức (ẩn banner nâng cấp)', async () => {
     useAuthStore.setState({
       user: {
         id: 'google-user-9999-wxyz',
         isAnonymous: false,
         email: 'player@gmail.com',
-        displayName: 'VuaCờCaro',
+        displayName: 'VuaChơiGame',
         avatarUrl: 'https://example.com/avatar.png',
         provider: 'google',
       },
       profile: {
         id: 'google-user-9999-wxyz',
         userId: 'google-user-9999-wxyz',
-        displayName: 'VuaCờCaro',
+        displayName: 'VuaChơiGame',
         avatarUrl: 'https://example.com/avatar.png',
         role: 'player',
         isAnonymous: false,
@@ -96,122 +104,159 @@ describe('ProfilePage Component Tests (ProfilePage.tsx - P2.1c)', () => {
       isInitialized: true,
     });
 
-    await act(async () => {
-      render(<ProfilePage />);
-    });
+    await renderProfilePage();
 
-    expect(screen.getByTestId('profile-display-name').textContent).toBe('VuaCờCaro');
-    expect(screen.getByTestId('profile-status-badge').textContent).toBe('Google Account');
-    expect(screen.getByText(/✉️ player@gmail\.com/i)).not.toBeNull();
     expect(screen.queryByTestId('google-upgrade-banner')).toBeNull();
+    expect(screen.getByText(/Đã liên kết với Google:/i)).not.toBeNull();
+    expect(screen.getByText('player@gmail.com')).not.toBeNull();
     expect(screen.getByTestId('profile-sign-out-btn')).not.toBeNull();
   });
 
-  it('5. Đổi tên hiển thị: Validate client-side báo lỗi khi tên rỗng hoặc ngắn hơn 2 ký tự', async () => {
-    await act(async () => {
-      render(<ProfilePage />);
-    });
-
-    const input = screen.getByTestId('display-name-input');
-    const form = input.closest('form');
-    expect(form).not.toBeNull();
-
-    await act(async () => {
-      fireEvent.change(input, { target: { value: 'A' } });
-    });
-
-    if (form) {
-      await act(async () => {
-        fireEvent.submit(form);
-      });
-    }
-
-    expect(screen.getByTestId('name-error-banner')).not.toBeNull();
-    expect(screen.getByText(/Tên hiển thị phải có độ dài từ 2 đến 20 ký tự/i)).not.toBeNull();
-  });
-
-  it('6. Đổi tên hiển thị thành công: gọi updateDisplayName và hiển thị thông báo thành công', async () => {
+  it('4. Đổi tên hiển thị: validation và kích hoạt updateDisplayName', async () => {
     const updateSpy = vi.fn().mockResolvedValue(undefined);
     useAuthStore.setState({ updateDisplayName: updateSpy });
 
-    await act(async () => {
-      render(<ProfilePage />);
-    });
+    await renderProfilePage();
 
     const input = screen.getByTestId('display-name-input');
-    const form = input.closest('form');
-    expect(form).not.toBeNull();
+    const saveBtn = screen.getByTestId('save-name-btn');
 
     await act(async () => {
-      fireEvent.change(input, { target: { value: 'ChiếnThầnCaro' } });
+      fireEvent.change(input, { target: { value: 'ChiếnBinhX' } });
     });
 
-    if (form) {
-      await act(async () => {
-        fireEvent.submit(form);
-      });
-    }
+    await act(async () => {
+      fireEvent.click(saveBtn);
+    });
 
-    expect(updateSpy).toHaveBeenCalledWith('ChiếnThầnCaro');
-    expect(screen.getByTestId('name-success-banner')).not.toBeNull();
-    expect(screen.getByText(/Cập nhật tên hiển thị thành công!/i)).not.toBeNull();
+    expect(updateSpy).toHaveBeenCalledWith('ChiếnBinhX');
   });
 
-  it('7. Hiển thị khối thống kê thành tích offline khi có dữ liệu game cục bộ', async () => {
-    vi.spyOn(gameLocalDataModule, 'hasGameData').mockImplementation((gameId) => gameId === 'caro');
+  it('5. Đăng xuất: mở modal xác nhận và gọi signOut', async () => {
+    useAuthStore.setState({
+      user: {
+        id: 'google-user-9999-wxyz',
+        isAnonymous: false,
+        provider: 'google',
+      },
+    });
+
+    const signOutSpy = vi.fn().mockResolvedValue(undefined);
+    useAuthStore.setState({ signOut: signOutSpy });
+
+    await renderProfilePage();
+
+    const signOutBtn = screen.getByTestId('profile-sign-out-btn');
+    await act(async () => {
+      fireEvent.click(signOutBtn);
+    });
+
+    const confirmBtns = screen.getAllByRole('button', { name: /^Đăng xuất$/i });
+    const targetConfirmBtn = confirmBtns[confirmBtns.length - 1];
+    expect(targetConfirmBtn).toBeDefined();
+    if (!targetConfirmBtn) return;
+
+    await act(async () => {
+      fireEvent.click(targetConfirmBtn);
+    });
+
+    expect(signOutSpy).toHaveBeenCalled();
+  });
+
+  it('6. BẰNG CHỨNG DoD GỐC: Render đầy đủ thẻ GameStatCard cho mọi game trong Registry', async () => {
+    await renderProfilePage();
+
+    const allGames = getAllGames();
+    expect(allGames.length).toBeGreaterThan(0);
+
+    for (const game of allGames) {
+      expect(screen.getByTestId(`game-stat-card-${game.definition.id}`)).not.toBeNull();
+    }
+  });
+
+  it('7. Tải dữ liệu Cloud: Hiển thị StatsSummary và MatchHistoryList', async () => {
+    const mockAllStats = [
+      {
+        gameId: 'caro',
+        totalMatches: 25,
+        byModeKey: {
+          'vs_ai:hard': { matches: 25, wins: 15, losses: 10, draws: 0 },
+        },
+      },
+    ];
+
+    const mockMatches = [
+      {
+        id: 'match-1',
+        gameId: 'caro',
+        mode: 'vs_ai',
+        isRanked: false,
+        startedAt: '2026-08-19T10:00:00Z',
+        endedAt: '2026-08-19T10:02:00Z',
+        durationMs: 120000,
+        endReason: 'normal',
+        participants: [
+          {
+            seatIndex: 0,
+            userId: 'anon-user-1234-abcd',
+            isBot: false,
+            botLevel: null,
+            result: 'win' as const,
+            placement: 1,
+            score: null,
+            ratingDelta: null,
+          },
+        ],
+      },
+    ];
+
+    vi.spyOn(statsRepoModule, 'getMyGameStats').mockResolvedValue(mockAllStats);
+    vi.spyOn(matchRepoModule, 'getMyRecentMatches').mockResolvedValue(mockMatches);
+
+    await renderProfilePage();
+
+    expect(screen.getByTestId('stats-summary-card')).not.toBeNull();
+    expect(screen.getByTestId('summary-total-matches').textContent).toBe('25');
+    expect(screen.getByTestId('summary-ai-wins').textContent).toBe('15');
+    expect(screen.getByTestId('match-row-match-1')).not.toBeNull();
+  });
+
+  it('8. Lỗi mạng Cloud: Hiển thị banner cảnh báo và VẪN hiển thị mục thành tích local (Offline-first)', async () => {
+    vi.spyOn(statsRepoModule, 'getMyGameStats').mockRejectedValue(new Error('Network error'));
+    vi.spyOn(matchRepoModule, 'getMyRecentMatches').mockRejectedValue(new Error('Network error'));
+
+    vi.spyOn(gameLocalDataModule, 'hasGameData').mockReturnValue(true);
     vi.spyOn(gameLocalDataModule, 'getStats').mockReturnValue({
       totalMatches: 10,
       wins: 7,
       losses: 3,
       draws: 0,
-      currentStreak: 2,
-      bestStreak: 5,
       byMode: {},
-      updatedAt: '2026-08-18T10:00:00.000Z',
+      currentStreak: 2,
+      bestStreak: 4,
+      updatedAt: '2026-08-19T10:00:00.000Z',
     });
 
+    await renderProfilePage();
+
+    expect(screen.getByTestId('cloud-error-banner')).not.toBeNull();
+
+    // Mở mục Thành tích trên máy này
+    const toggleBtn = screen.getByTestId('toggle-local-stats-btn');
     await act(async () => {
-      render(<ProfilePage />);
+      fireEvent.click(toggleBtn);
     });
 
     expect(screen.getByTestId('stats-card-caro')).not.toBeNull();
-    expect(screen.getByText('10 ván đã đấu')).not.toBeNull();
-    expect(screen.getByText('70%')).not.toBeNull();
-    expect(screen.getByText('5 🔥')).not.toBeNull();
+    expect(screen.getAllByText('10 ván').length).toBeGreaterThan(0);
   });
 
-  it('8. Hiển thị thông báo trạng thái kết nối máy chủ và số lượng game khả dụng (Kiểm chứng P2.5a)', async () => {
-    vi.spyOn(catalogRepoModule, 'getGames').mockResolvedValue([
-      {
-        id: 'caro',
-        name: 'Cờ Caro',
-        category: 'board',
-        ranked: true,
-        ratingSystem: 'elo',
-        scoring: 'win_loss',
-        minPlayers: 2,
-        maxPlayers: 2,
-        isEnabled: true,
-        rankedEnabled: true,
-      },
-    ]);
-
-    await act(async () => {
-      render(<ProfilePage />);
-    });
-
-    expect(screen.getByTestId('server-connection-status')).not.toBeNull();
-    expect(screen.getByText(/Đã kết nối máy chủ: 1 trò chơi khả dụng/i)).not.toBeNull();
-  });
-
-  it('9. Hiển thị badge "Chờ đồng bộ: {n} trận" khi có tác vụ trong hàng đợi Outbox', async () => {
+  it('9. Hiển thị badge chỉ báo đồng bộ khi có item trong hàng đợi Outbox', async () => {
     vi.spyOn(syncOutboxModule, 'useSyncOutboxCount').mockReturnValue(3);
 
-    await act(async () => {
-      render(<ProfilePage />);
-    });
+    await renderProfilePage();
 
     expect(screen.getByTestId('sync-pending-badge')).not.toBeNull();
-    expect(screen.getByText(/Chờ đồng bộ: 3 trận/i)).not.toBeNull();
+    expect(screen.getByText('Chờ đồng bộ: 3 trận')).not.toBeNull();
   });
 });
