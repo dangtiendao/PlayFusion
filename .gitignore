@@ -35,6 +35,6 @@ docs/dependency-graph.html
 
 # Environment variables
 .env
-.env.production
-.env.local
-.env.*.local
+.env.*
+!.env.example
+
