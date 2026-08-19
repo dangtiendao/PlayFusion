@@ -197,3 +197,33 @@ export interface RecordOfflineMatchParams {
   /** Danh sách đấu thủ tham gia */
   readonly participants: readonly RecordOfflineParticipantParam[];
 }
+
+/**
+ * Thống kê thành tích thi đấu theo một chế độ chơi cụ thể.
+ */
+export interface ModeStats {
+  /** Tổng số ván đã đấu */
+  readonly matches: number;
+  /** Số ván thắng */
+  readonly wins: number;
+  /** Số ván thua */
+  readonly losses: number;
+  /** Số ván hòa */
+  readonly draws: number;
+}
+
+/**
+ * Thống kê tổng hợp toàn diện của một người chơi cho một trò chơi cụ thể (bảng `matches` & `match_participants`).
+ *
+ * GHI CHÚ KIẾN TRÚC:
+ * - `byModeKey` được sinh động từ dữ liệu thật (ví dụ: 'vs_ai:easy', 'vs_ai:medium', 'vs_ai:hard', 'local_pvp', 'online_1v1'...).
+ * - Khi có game mode mới xuất hiện trong DB, cấu trúc tự động bổ sung key tương ứng mà không cần sửa type.
+ */
+export interface PlayerGameStats {
+  /** Mã định danh của trò chơi (ví dụ: 'caro', 'co_tuong') */
+  readonly gameId: string;
+  /** Tổng số ván đấu người chơi đã tham gia trong game này */
+  readonly totalMatches: number;
+  /** Phân rã số liệu theo từng modeKey */
+  readonly byModeKey: Record<string, ModeStats>;
+}

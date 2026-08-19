@@ -71,3 +71,28 @@ export function formatRelativeTime(isoString: string, nowMs?: number): string {
   const year = d.getFullYear();
   return `${day}/${month}/${year}`;
 }
+
+/**
+ * Định dạng thời lượng (tính bằng mili-giây) sang dạng chuỗi hiển thị gọn gàng (mm:ss hoặc s).
+ *
+ * @param durationMs Thời lượng thi đấu tính bằng mili-giây
+ * @returns Chuỗi định dạng thời lượng (ví dụ: "02:15", "00:45", "< 1s")
+ */
+export function formatDurationMs(durationMs: number | null | undefined): string {
+  if (durationMs === null || durationMs === undefined || durationMs < 0) {
+    return '--:--';
+  }
+
+  const totalSeconds = Math.floor(durationMs / 1000);
+  if (totalSeconds < 1) {
+    return '< 1s';
+  }
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  const mm = minutes.toString().padStart(2, '0');
+  const ss = seconds.toString().padStart(2, '0');
+
+  return `${mm}:${ss}`;
+}
