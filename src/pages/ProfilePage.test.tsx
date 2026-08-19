@@ -4,6 +4,7 @@ import { render, screen, fireEvent, act } from '@testing-library/react';
 import { ProfilePage } from './ProfilePage';
 import { useAuthStore, _resetAuthStoreForTesting } from '../stores/authStore';
 import * as gameLocalDataModule from '../core/gameLocalData';
+import * as catalogRepoModule from '../repositories/catalogRepository';
 
 describe('ProfilePage Component Tests (ProfilePage.tsx - P2.1c)', () => {
   beforeEach(() => {
@@ -176,5 +177,29 @@ describe('ProfilePage Component Tests (ProfilePage.tsx - P2.1c)', () => {
     expect(screen.getByText('10 ván đã đấu')).not.toBeNull();
     expect(screen.getByText('70%')).not.toBeNull();
     expect(screen.getByText('5 🔥')).not.toBeNull();
+  });
+
+  it('8. Hiển thị thông báo trạng thái kết nối máy chủ và số lượng game khả dụng (Kiểm chứng P2.5a)', async () => {
+    vi.spyOn(catalogRepoModule, 'getGames').mockResolvedValue([
+      {
+        id: 'caro',
+        name: 'Cờ Caro',
+        category: 'board',
+        ranked: true,
+        ratingSystem: 'elo',
+        scoring: 'win_loss',
+        minPlayers: 2,
+        maxPlayers: 2,
+        isEnabled: true,
+        rankedEnabled: true,
+      },
+    ]);
+
+    await act(async () => {
+      render(<ProfilePage />);
+    });
+
+    expect(screen.getByTestId('server-connection-status')).not.toBeNull();
+    expect(screen.getByText(/Đã kết nối máy chủ: 1 trò chơi khả dụng/i)).not.toBeNull();
   });
 });

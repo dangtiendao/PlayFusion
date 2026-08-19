@@ -4,3 +4,4 @@ export * from './win-check';
 export * from './engine';
 export * from './ai';
 export * from './manifest';
+export * from './moves-codec';
