@@ -133,3 +133,67 @@ export interface PlayerRating {
   /** Thời điểm thi đấu ván gần nhất (ISO 8601 string hoặc null) */
   readonly lastPlayedAt: string | null;
 }
+
+/**
+ * Mã phân loại lỗi tầng Repository phục vụ cơ chế Retry & Outbox Sync (P2.5c).
+ * - 'RETRYABLE': Lỗi mạng, mất kết nối, timeout (có thể thử lại an toàn).
+ * - 'FATAL': Lỗi dữ liệu không hợp lệ, vi phạm ràng buộc schema/policy (không được retry).
+ */
+export type RepoErrorCode = 'RETRYABLE' | 'FATAL';
+
+/**
+ * Lớp lỗi chuẩn hóa của tầng Repository.
+ */
+export class RepoError extends Error {
+  readonly code: RepoErrorCode;
+  readonly isRetryable: boolean;
+  readonly cause?: unknown;
+
+  constructor(message: string, code: RepoErrorCode, cause?: unknown) {
+    super(message);
+    this.name = 'RepoError';
+    this.code = code;
+    this.isRetryable = code === 'RETRYABLE';
+    if (cause !== undefined) {
+      this.cause = cause;
+    }
+  }
+}
+
+/**
+ * Thông tin đấu thủ trong yêu cầu ghi nhận ván đấu offline.
+ */
+export interface RecordOfflineParticipantParam {
+  readonly seatIndex: number;
+  readonly isBot: boolean;
+  readonly botLevel?: 'easy' | 'medium' | 'hard' | null;
+  readonly result?: 'win' | 'loss' | 'draw' | null;
+  readonly placement?: number | null;
+  readonly score?: number | null;
+}
+
+/**
+ * Tham số đầu vào để ghi nhận ván đấu offline lên máy chủ qua RPC `record_offline_match`.
+ */
+export interface RecordOfflineMatchParams {
+  /** Định danh duy nhất của ván đấu (UUID do client sinh khi ván bắt đầu) */
+  readonly matchId: string;
+  /** Mã trò chơi (ví dụ: 'caro') */
+  readonly gameId: string;
+  /** Chế độ chơi offline ('solo' | 'vs_ai' | 'local_pvp') */
+  readonly mode: 'solo' | 'vs_ai' | 'local_pvp';
+  /** Thời điểm bắt đầu ván đấu (Date object hoặc ISO 8601 string) */
+  readonly startedAt: Date | string;
+  /** Tổng thời lượng thi đấu tính bằng mili-giây */
+  readonly durationMs: number;
+  /** Lý do kết thúc ván đấu ('checkmate' | 'resigned' | 'timeout' | ...) */
+  readonly endReason?: string | null;
+  /** Tùy chọn cấu hình ván cờ (JSON string) */
+  readonly engineOptions?: string | null;
+  /** Trạng thái bàn cờ khi kết thúc (JSON string) */
+  readonly finalState?: string | null;
+  /** Chuỗi nén toàn bộ danh sách nước đi */
+  readonly moves?: string | null;
+  /** Danh sách đấu thủ tham gia */
+  readonly participants: readonly RecordOfflineParticipantParam[];
+}

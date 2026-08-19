@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { User } from '@supabase/supabase-js';
 import { supabase } from './supabaseClient';
 import * as matchRepo from './matchRepository';
+import { RepoError } from './types';
 
 describe('Match Repository Unit Tests (matchRepository.ts - P2.5a)', () => {
   beforeEach(() => {
@@ -192,6 +193,74 @@ describe('Match Repository Unit Tests (matchRepository.ts - P2.5a)', () => {
       await expect(matchRepo.getMatchById('match-123')).rejects.toThrowError(
         /Không thể tải chi tiết ván đấu: Connection reset/i,
       );
+    });
+  });
+
+  describe('recordOfflineMatch', () => {
+    const validParams = {
+      matchId: '11111111-2222-3333-4444-555555555555',
+      gameId: 'caro',
+      mode: 'vs_ai' as const,
+      startedAt: new Date('2026-08-18T10:00:00Z'),
+      durationMs: 120000,
+      endReason: 'checkmate',
+      engineOptions: '{"boardSize":15}',
+      finalState: '{"winner":0}',
+      moves: '112,97,113',
+      participants: [
+        { seatIndex: 0, isBot: false, botLevel: null, result: 'win' as const },
+        { seatIndex: 1, isBot: true, botLevel: 'medium' as const, result: 'loss' as const },
+      ],
+    };
+
+    it('7. Gọi RPC thành công và trả về match_id hợp lệ', async () => {
+      vi.spyOn(supabase, 'rpc').mockResolvedValue({
+        data: '11111111-2222-3333-4444-555555555555',
+        error: null,
+      } as unknown as Awaited<ReturnType<typeof supabase.rpc>>);
+
+      const result = await matchRepo.recordOfflineMatch(validParams);
+      expect(result).toBe('11111111-2222-3333-4444-555555555555');
+      expect(supabase.rpc).toHaveBeenCalledWith('record_offline_match', {
+        p_match: expect.objectContaining({
+          match_id: '11111111-2222-3333-4444-555555555555',
+          game_id: 'caro',
+          mode: 'vs_ai',
+        }),
+      });
+    });
+
+    it('8. Ném lỗi RepoError(FATAL, isRetryable=false) khi cơ sở dữ liệu báo lỗi Validation', async () => {
+      vi.spyOn(supabase, 'rpc').mockResolvedValue({
+        data: null,
+        error: {
+          message: 'Validation Error: Chế độ chơi "online_1v1" không hợp lệ cho trận đấu offline.',
+          code: '22023',
+        },
+      } as unknown as Awaited<ReturnType<typeof supabase.rpc>>);
+
+      await expect(matchRepo.recordOfflineMatch(validParams)).rejects.toSatisfy((err: unknown) => {
+        const isRepoError = err instanceof RepoError;
+        const isFatal = (err as RepoError).code === 'FATAL';
+        const notRetryable = !(err as RepoError).isRetryable;
+        return isRepoError && isFatal && notRetryable;
+      });
+    });
+
+    it('9. Ném lỗi RepoError(RETRYABLE, isRetryable=true) khi gặp sự cố mạng hoặc 500', async () => {
+      vi.spyOn(supabase, 'rpc').mockResolvedValue({
+        data: null,
+        error: {
+          message: 'Failed to fetch (Network disconnected)',
+          code: 'FETCH_ERROR',
+        },
+      } as unknown as Awaited<ReturnType<typeof supabase.rpc>>);
+
+      await expect(matchRepo.recordOfflineMatch(validParams)).rejects.toSatisfy((err: unknown) => {
+        const isRepoError = err instanceof RepoError;
+        const isRetryable = (err as RepoError).code === 'RETRYABLE';
+        return isRepoError && isRetryable;
+      });
     });
   });
 });

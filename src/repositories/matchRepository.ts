@@ -21,7 +21,14 @@
  */
 
 import { supabase } from './supabaseClient';
-import type { MatchSummary, MatchParticipantSummary } from './types';
+import {
+  type MatchSummary,
+  type MatchParticipantSummary,
+  type RecordOfflineMatchParams,
+  RepoError,
+} from './types';
+
+export { RepoError };
 
 interface DbParticipantWithProfileRow {
   seat_index: number;
@@ -231,5 +238,83 @@ export async function getMatchById(id: string): Promise<MatchSummary | null> {
       throw err;
     }
     throw new Error('Lỗi không xác định khi truy vấn chi tiết ván đấu.');
+  }
+}
+
+/**
+ * Ghi nhận kết quả một ván đấu offline lên cơ sở dữ liệu qua RPC `record_offline_match`.
+ *
+ * GHI CHÚ BẢO MẬT & IDEMPOTENCY:
+ * 1. Client sinh `matchId` (UUID) ngay khi ván đấu bắt đầu. Khi ván kết thúc, gọi hàm này để lưu trữ.
+ * 2. Hàm có tính Idempotent: Nếu gọi lại nhiều lần với cùng `matchId` (ví dụ do Outbox retry),
+ *    DB sẽ trả về ID mà không tạo bản ghi trùng lặp.
+ * 3. Phân loại lỗi:
+ *    - Lỗi nghiệp vụ / validate từ DB (mã 22023, 42501, v.v.) -> ném `RepoError('FATAL')` (không retry).
+ *    - Lỗi mạng / timeout / mất kết nối -> ném `RepoError('RETRYABLE')` (sẽ được Outbox P2.5c retry).
+ *
+ * @param params Tham số ván đấu offline cần ghi nhận.
+ * @returns ID của ván đấu đã được ghi nhận thành công.
+ */
+export async function recordOfflineMatch(params: RecordOfflineMatchParams): Promise<string> {
+  const startedAtIso =
+    params.startedAt instanceof Date
+      ? params.startedAt.toISOString()
+      : new Date(params.startedAt).toISOString();
+
+  const payload = {
+    match_id: params.matchId,
+    game_id: params.gameId,
+    mode: params.mode,
+    started_at: startedAtIso,
+    duration_ms: Math.max(1, Math.round(params.durationMs)),
+    end_reason: params.endReason ?? null,
+    engine_options: params.engineOptions ?? null,
+    final_state: params.finalState ?? null,
+    moves: params.moves ?? null,
+    participants: params.participants.map((p) => ({
+      seat_index: p.seatIndex,
+      is_bot: p.isBot,
+      bot_level: p.botLevel ?? null,
+      result: p.result ?? null,
+      placement: p.placement ?? null,
+      score: p.score ?? null,
+    })),
+  };
+
+  try {
+    const { data, error } = await supabase.rpc('record_offline_match', { p_match: payload });
+
+    if (error) {
+      const msg = error.message.toLowerCase();
+      const code = (error as { code?: string }).code;
+
+      // Lỗi validate hoặc phân quyền từ PostgreSQL / PostgREST -> FATAL
+      if (
+        code === '22023' ||
+        code === '42501' ||
+        code === 'P0001' ||
+        msg.includes('validation error') ||
+        msg.includes('unauthorized') ||
+        msg.includes('check constraint') ||
+        msg.includes('invalid')
+      ) {
+        throw new RepoError(`Lỗi xác thực dữ liệu trận đấu: ${error.message}`, 'FATAL', error);
+      }
+
+      // Các lỗi khác (network, timeout, 5xx...) -> RETRYABLE
+      throw new RepoError(`Lỗi kết nối khi lưu ván đấu: ${error.message}`, 'RETRYABLE', error);
+    }
+
+    if (!data) {
+      throw new RepoError('Máy chủ không phản hồi mã trận đấu sau khi lưu.', 'RETRYABLE');
+    }
+
+    return data as string;
+  } catch (err: unknown) {
+    if (err instanceof RepoError) {
+      throw err;
+    }
+    const message = err instanceof Error ? err.message : 'Lỗi không xác định khi lưu ván đấu.';
+    throw new RepoError(`Lỗi mạng khi gửi kết quả ván đấu: ${message}`, 'RETRYABLE', err);
   }
 }
