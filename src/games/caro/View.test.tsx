@@ -8,6 +8,7 @@ import type { GameShellApi } from '../types';
 import type { CaroMatchConfig } from './types';
 import * as useCaroAiModule from './useCaroAi';
 import * as gameLocalDataModule from '../../core/gameLocalData';
+import * as syncBootstrapModule from '../../core/syncBootstrap';
 
 /**
  * Mock hook useCaroAi để kiểm soát hành vi bất đồng bộ và kiểm tra 4 ca vòng đời
@@ -288,5 +289,51 @@ describe('Caro Game View Component, Local Data & Auto-Save Recovery Tests (View.
 
     expect(gameLocalDataModule.clearSavedMatch).toHaveBeenCalledWith('caro');
     expect(screen.queryByTestId('saved-match-card')).toBeNull();
+  });
+
+  it('8. Khi ván kết thúc -> enqueueAndSyncMatch (P2.5c) được gọi để đưa kết quả vào hàng đợi Outbox', () => {
+    const syncSpy = vi.spyOn(syncBootstrapModule, 'enqueueAndSyncMatch').mockReturnValue({
+      id: 'test-match-id',
+      kind: 'offline_match',
+      payload: {} as never,
+      createdAt: new Date().toISOString(),
+      attempts: 0,
+    });
+
+    render(
+      <CaroGameView definition={caroManifest} onGameEnd={mockOnGameEnd} shellApi={mockShellApi} />,
+    );
+
+    // Bắt đầu ván mới chế độ 2 người 1 máy
+    const pvpBtn = screen.getByTestId('mode-btn-local_pvp');
+    act(() => {
+      fireEvent.click(pvpBtn);
+    });
+
+    // Tạo ván thắng 5 quân liên tiếp cho quân X (player 0)
+    // Row 0: 0, 1, 2, 3, 4 (X) vs Row 1: 15, 16, 17, 18 (O)
+    playMove2Tap(screen.getByTestId('caro-cell-0')); // X: 0
+    playMove2Tap(screen.getByTestId('caro-cell-15')); // O: 15
+    playMove2Tap(screen.getByTestId('caro-cell-1')); // X: 1
+    playMove2Tap(screen.getByTestId('caro-cell-16')); // O: 16
+    playMove2Tap(screen.getByTestId('caro-cell-2')); // X: 2
+    playMove2Tap(screen.getByTestId('caro-cell-17')); // O: 17
+    playMove2Tap(screen.getByTestId('caro-cell-3')); // X: 3
+    playMove2Tap(screen.getByTestId('caro-cell-18')); // O: 18
+    playMove2Tap(screen.getByTestId('caro-cell-4')); // X: 4 -> WIN!
+
+    expect(syncSpy).toHaveBeenCalledTimes(1);
+    expect(syncSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        gameId: 'caro',
+        mode: 'local_pvp',
+        endReason: 'five_in_a_row',
+        moves: '0,15,1,16,2,17,3,18,4',
+        participants: expect.arrayContaining([
+          expect.objectContaining({ seatIndex: 0, result: 'win' }),
+          expect.objectContaining({ seatIndex: 1, result: 'loss' }),
+        ]),
+      }),
+    );
   });
 });

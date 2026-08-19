@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Session, AuthChangeEvent } from '@supabase/supabase-js';
 import { useAuthStore, _resetAuthStoreForTesting } from './authStore';
 import * as authRepo from '@/repositories/authRepository';
 import * as profileRepo from '@/repositories/profileRepository';
@@ -65,7 +64,9 @@ describe('Auth Store Unit Tests (authStore.ts - P2.1b & P2.1c)', () => {
       updatedAt: '2026-08-18T10:00:00.000Z',
     };
 
-    vi.spyOn(authRepo, 'getSession').mockResolvedValue({ access_token: 'valid-token' } as Session);
+    vi.spyOn(authRepo, 'getSession').mockResolvedValue({
+      access_token: 'valid-token',
+    } as unknown as Awaited<ReturnType<typeof authRepo.getSession>>);
     vi.spyOn(authRepo, 'getUser').mockResolvedValue(mockExistingUser);
     const anonSpy = vi.spyOn(authRepo, 'signInAnonymously');
     vi.spyOn(profileRepo, 'getMyProfile').mockResolvedValue(mockProfile);
@@ -79,9 +80,9 @@ describe('Auth Store Unit Tests (authStore.ts - P2.1b & P2.1c)', () => {
   });
 
   it('3. onAuthStateChange SIGNED_IN -> cập nhật store và reload profile', async () => {
-    let authCallback = (_event: AuthChangeEvent, _user: authRepo.AppAuthUser | null): void => {
-      void _event;
-      void _user;
+    type AuthChangeCallback = Parameters<typeof authRepo.onAuthStateChange>[0];
+    let authCallback: AuthChangeCallback = () => {
+      /* noop */
     };
 
     vi.spyOn(authRepo, 'getSession').mockResolvedValue(null);

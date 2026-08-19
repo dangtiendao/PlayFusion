@@ -64,10 +64,19 @@
 
 ---
 
-## 3. TÓM TẮT CÁC QUY TẮC BẢO MẬT CỐT LÕI (CORE SECURITY INVARIANTS)
+## 3. PHÂN QUYỀN STORED PROCEDURES / RPC FUNCTIONS
+
+| Tên Stored Function / RPC                         | `anon`<br>_(Chưa Auth)_ | `authenticated`<br>_(Đã đăng nhập)_ | `service_role`<br>_(Backend / Server)_ | Quy Tắc Bảo Mật & Ràng Buộc Xác Thực                                                                                                                                                                                                                      |
+| :------------------------------------------------ | :---------------------: | :---------------------------------: | :------------------------------------: | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`public.record_offline_match(p_match jsonb)`**  |   ❌ Bị chặn (42501)    |             ✅ Được gọi             |              ✅ Được gọi               | **Chỉ dành cho trận offline** (`solo`, `vs_ai`, `local_pvp`). Server tự động gán `user_id = auth.uid()`, tự tính `ended_at`, cưỡng chế `is_ranked = false`, `season_id = NULL`. Client vẫn bị cấm INSERT trực tiếp vào `matches` và `match_participants`. |
+| **`public.audit_wallet_balance(p_user_id uuid)`** |       ❌ Bị chặn        |             ❌ Bị chặn              |              ✅ Được gọi               | Hàm đối soát nội bộ của backend (P2.3 / P2.4c), chỉ `service_role` được thực thi.                                                                                                                                                                         |
+
+---
+
+## 4. TÓM TẮT CÁC QUY TẮC BẢO MẬT CỐT LÕI (CORE SECURITY INVARIANTS)
 
 1. **Khóa ghi mặc định toàn hệ thống (`Deny-write by default`)**:
-   - 14/15 bảng cơ sở dữ liệu cấm 100% mọi quyền ghi (`INSERT`, `UPDATE`, `DELETE`) từ client thông thường.
+   - 14/15 bảng cơ sở dữ liệu cấm 100% mọi quyền ghi (`INSERT`, `UPDATE`, `DELETE`) từ client thông thường. Client muốn ghi nhận ván đấu offline bắt buộc phải gọi qua RPC `record_offline_match`.
 2. **Policy ghi DUY NHẤT mở cho client (`public.user_equipped`)**:
    - Chỉ cho phép client tự đổi trang bị khi và chỉ khi thỏa mãn ràng buộc `WITH CHECK (EXISTS (SELECT 1 FROM user_inventory WHERE user_id = auth.uid() AND item_id = user_equipped.item_id))`.
 3. **Chống Leo Thang Đặc Quyền Trên `public.profiles`**:

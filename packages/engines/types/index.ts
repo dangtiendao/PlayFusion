@@ -12,3 +12,4 @@ export * from './errors';
 export * from './engine';
 export * from './game-definition';
 export * from './validate';
+export * from './moves-codec';

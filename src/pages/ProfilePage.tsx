@@ -5,6 +5,8 @@ import { hapticTap, hapticSuccess, hapticError } from '@/core/haptics';
 import { getAllGames } from '@/games/registry';
 import { hasGameData, getStats } from '@/core/gameLocalData';
 import { ConfirmDialog } from '@/components/game-shell/ConfirmDialog';
+import { getGames } from '@/repositories/catalogRepository';
+import { useSyncOutboxCount } from '@/core/syncOutbox';
 
 /**
  * ==============================================================================
@@ -41,6 +43,28 @@ export function ProfilePage() {
   // State đăng nhập Google & Đăng xuất
   const [isLinkingGoogle, setIsLinkingGoogle] = useState<boolean>(false);
   const [showSignOutConfirm, setShowSignOutConfirm] = useState<boolean>(false);
+
+  // Kiểm chứng P2.5a — P2.6 làm thống kê online thật
+  const [onlineGamesCount, setOnlineGamesCount] = useState<number | null>(null);
+
+  // Số lượng ván đấu đang chờ đồng bộ Outbox (P2.5c)
+  const pendingSyncCount = useSyncOutboxCount();
+
+  useEffect(() => {
+    let isMounted = true;
+    getGames()
+      .then((games) => {
+        if (isMounted) {
+          setOnlineGamesCount(games.length);
+        }
+      })
+      .catch(() => {
+        // Bỏ qua lỗi kết nối ở bước hiển thị phụ trợ
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Đồng bộ nameInput khi profile load xong
   useEffect(() => {
@@ -361,6 +385,28 @@ export function ProfilePage() {
             <p className="text-xs text-slate-500 dark:text-slate-400 italic">
               Hiện chưa có ván đấu nào được hoàn thành trên thiết bị này.
             </p>
+          </div>
+        )}
+
+        {/* Chỉ báo đồng bộ Outbox (P2.5c) */}
+        {pendingSyncCount > 0 && (
+          <div
+            data-testid="sync-pending-badge"
+            className="flex items-center justify-center gap-1.5 p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs font-semibold text-amber-800 dark:text-amber-300"
+          >
+            <span>⏳</span>
+            <span>Chờ đồng bộ: {pendingSyncCount} trận</span>
+          </div>
+        )}
+
+        {/* Kiểm chứng P2.5a — P2.6 làm thống kê online thật */}
+        {onlineGamesCount !== null && (
+          <div
+            data-testid="server-connection-status"
+            className="flex items-center justify-center gap-1.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 pt-1"
+          >
+            <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>Đã kết nối máy chủ: {onlineGamesCount} trò chơi khả dụng</span>
           </div>
         )}
 
