@@ -1,0 +1,70 @@
+name: RLS Security Audit
+
+# ==============================================================================
+# WORKFLOW KIỂM TOÁN AN NINH RLS ĐỊNH KỲ (RLS SECURITY AUDIT - P2.7c)
+# ==============================================================================
+#
+# NGUYÊN TẮC KIỂM THỬ:
+# 1. ĐỘC LẬP VỚI CI PUSH:
+#    - Bộ kiểm thử RLS Live Tests (`test:rls`) kết nối trực tiếp vào Supabase DEV thật
+#      để kiểm tra hành vi Row Level Security từ phía client anon/user.
+#    - Không gắn vào CI push hàng ngày để giữ cho quy trình commit/PR luôn chạy nhanh
+#      và 100% cô lập offline.
+# 2. TỰ ĐỘNG DỌN DẸP SẠCH SẼ (ZERO RESIDUAL ARTIFACTS):
+#    - Test suite tự sinh ra 2 test user ngẫu nhiên (`rls-test-user-a-...`) và tự động
+#      gọi `auth.admin.deleteUser()` trong hook `teardownRlsTestContext()` để xóa sạch
+#      người dùng cùng mọi dữ liệu liên kết (CASCADE), không để lại rác trong DB.
+# ==============================================================================
+
+on:
+  schedule:
+    # Chạy tự động hàng tuần vào 21:23 UTC tối Chủ Nhật (04:23 sáng Thứ Hai giờ VN)
+    # Khung giờ chạy sau workflow backup 1 tiếng
+    - cron: '23 21 * * 0'
+  workflow_dispatch:
+    # Cho phép kích hoạt thủ công từ tab Actions để kiểm toán ngay lập tức
+
+concurrency:
+  group: rls-security-audit
+  cancel-in-progress: false
+
+jobs:
+  rls-audit:
+    name: Run RLS Security Test Suite (Dev Project)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 1. Checkout mã nguồn
+        uses: actions/checkout@v4
+
+      - name: 2. Cài đặt môi trường Node.js từ .nvmrc
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: 3. Cài đặt dependencies sạch (npm ci)
+        run: npm ci
+
+      - name: 4. Nạp biến môi trường & Masking Secrets
+        run: |
+          if [ -z "${{ secrets.RLS_SUPABASE_URL_DEV }}" ] || [ -z "${{ secrets.RLS_SERVICE_ROLE_DEV }}" ]; then
+            echo "❌ [ERROR] Thiếu secret cấu hình RLS Audit (RLS_SUPABASE_URL_DEV / RLS_SERVICE_ROLE_DEV)."
+            echo "   Vui lòng cấu hình các secret này trong GitHub Repository Settings."
+            exit 1
+          fi
+
+          echo "::add-mask::${{ secrets.RLS_SUPABASE_URL_DEV }}"
+          echo "::add-mask::${{ secrets.RLS_ANON_KEY_DEV }}"
+          echo "::add-mask::${{ secrets.RLS_SERVICE_ROLE_DEV }}"
+
+      - name: 5. Thực thi Kiểm toán An ninh RLS (Live Test Suite)
+        env:
+          SUPABASE_URL: ${{ secrets.RLS_SUPABASE_URL_DEV }}
+          SUPABASE_ANON_KEY: ${{ secrets.RLS_ANON_KEY_DEV }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.RLS_SERVICE_ROLE_DEV }}
+        run: |
+          echo "🛡️ [RLS AUDIT] Đang thực thi toàn bộ kiểm thử bảo mật RLS trên Supabase DEV..."
+          npm run test:rls
+          echo "✅ [RLS AUDIT] Toàn bộ chính sách RLS và Trigger bảo mật hoạt động hoàn hảo!"
