@@ -295,7 +295,7 @@ describe('Caro Game View Component, Local Data & Auto-Save Recovery Tests (View.
     const syncSpy = vi.spyOn(syncBootstrapModule, 'enqueueAndSyncMatch').mockReturnValue({
       id: 'test-match-id',
       kind: 'offline_match',
-      payload: {},
+      payload: {} as never,
       createdAt: new Date().toISOString(),
       attempts: 0,
     });

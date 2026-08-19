@@ -25,11 +25,16 @@ import {
 } from './syncOutbox';
 
 /**
+ * Kiểu phần tử Outbox chuyên biệt cho tác vụ ghi nhận ván đấu offline.
+ */
+export type OfflineMatchOutboxItem = OutboxItem<RecordOfflineMatchParams>;
+
+/**
  * Danh sách các hàm xử lý gửi dữ liệu lên máy chủ cho từng loại tác vụ trong Outbox.
  */
 const syncExecutors: OutboxExecutors = {
-  offline_match: async (payload: unknown) => {
-    await recordOfflineMatch(payload as RecordOfflineMatchParams);
+  offline_match: async (payload: RecordOfflineMatchParams) => {
+    await recordOfflineMatch(payload);
   },
 };
 
@@ -49,8 +54,8 @@ export async function triggerSync(): Promise<{ done: number; failed: number }> {
  * @param params Tham số chi tiết ván đấu cần ghi nhận.
  * @returns Bản ghi OutboxItem vừa được tạo trong hàng đợi.
  */
-export function enqueueAndSyncMatch(params: RecordOfflineMatchParams): OutboxItem {
-  const item = enqueueOutboxItem({
+export function enqueueAndSyncMatch(params: RecordOfflineMatchParams): OfflineMatchOutboxItem {
+  const item = enqueueOutboxItem<RecordOfflineMatchParams>({
     id: params.matchId,
     kind: 'offline_match',
     payload: params,

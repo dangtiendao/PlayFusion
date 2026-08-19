@@ -32,18 +32,18 @@ export const MAX_RETRY_ATTEMPTS = 10;
 /**
  * Các loại tác vụ đồng bộ hỗ trợ trong hàng đợi Outbox.
  */
-export type OutboxItemKind = 'offline_match';
+export type OutboxItemKind = 'offline_match' | string;
 
 /**
- * Cấu trúc một phần tử trong hàng đợi Outbox.
+ * Cấu trúc một phần tử trong hàng đợi Outbox được định kiểu chặt chẽ (Generic Type).
  */
-export interface OutboxItem {
+export interface OutboxItem<T = unknown> {
   /** Định danh duy nhất của tác vụ (ví dụ: matchId của ván cờ) */
   readonly id: string;
   /** Loại tác vụ cần đồng bộ */
   readonly kind: OutboxItemKind;
   /** Dữ liệu payload của tác vụ */
-  readonly payload: unknown;
+  readonly payload: T;
   /** Thời điểm tác vụ được đưa vào hàng đợi (ISO 8601 string) */
   readonly createdAt: string;
   /** Số lần đã thử gửi nhưng thất bại */
@@ -53,9 +53,19 @@ export interface OutboxItem {
 }
 
 /**
+ * Tham số đầu vào khi thêm tác vụ mới vào hàng đợi Outbox.
+ */
+export interface EnqueueOutboxParams<T = unknown> {
+  id: string;
+  kind: OutboxItemKind;
+  payload: T;
+}
+
+/**
  * Kiểu định nghĩa các hàm xử lý cho từng loại tác vụ trong hàng đợi.
  */
-export type OutboxExecutors = Record<OutboxItemKind, (payload: unknown) => Promise<void>>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type OutboxExecutors = Record<string, (payload: any) => Promise<void>>;
 
 // Cờ trạng thái chống chạy chồng (Concurrent execution guard)
 let isProcessing = false;
@@ -90,21 +100,21 @@ function saveOutboxItems(items: OutboxItem[]): void {
 }
 
 /**
- * Đưa một tác vụ mới vào hàng đợi Outbox.
+ * Đưa một tác vụ mới vào hàng đợi Outbox với generic type an toàn.
  *
- * @param item Thông tin tác vụ cần đồng bộ (chưa kèm createdAt và attempts).
+ * @param item Thông tin tác vụ cần đồng bộ.
  * @returns Bản ghi OutboxItem hoàn chỉnh đã được lưu.
  */
-export function enqueueOutboxItem(item: Omit<OutboxItem, 'createdAt' | 'attempts'>): OutboxItem {
+export function enqueueOutboxItem<T = unknown>(item: EnqueueOutboxParams<T>): OutboxItem<T> {
   const currentItems = getOutboxItems();
 
   // Kiểm tra trùng lặp ID (Idempotency bảo vệ phía client)
   const existingItem = currentItems.find((i) => i.id === item.id);
   if (existingItem) {
-    return existingItem;
+    return existingItem as OutboxItem<T>;
   }
 
-  const newItem: OutboxItem = {
+  const newItem: OutboxItem<T> = {
     id: item.id,
     kind: item.kind,
     payload: item.payload,
@@ -112,7 +122,7 @@ export function enqueueOutboxItem(item: Omit<OutboxItem, 'createdAt' | 'attempts
     attempts: 0,
   };
 
-  const updatedItems = [...currentItems, newItem];
+  const updatedItems = [...currentItems, newItem as OutboxItem];
 
   // Kiểm tra trần dung lượng 50 items (FIFO: Cắt bỏ item cũ nhất)
   if (updatedItems.length > MAX_OUTBOX_CAPACITY) {
@@ -158,14 +168,30 @@ export function clearAllOutboxItems(): void {
 /**
  * Đăng ký lắng nghe sự kiện thay đổi của hàng đợi Outbox.
  *
- * @param listener Hàm callback được gọi mỗi khi hàng đợi thêm/bớt item.
- * @returns Hàm hủy đăng ký (unsubscribe).
+ * @param listener Callback được gọi mỗi khi có item được thêm, sửa, hoặc xóa.
+ * @returns Hàm unsubscribe dọn dẹp listener.
  */
 export function subscribeOutbox(listener: () => void): () => void {
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
   };
+}
+
+/**
+ * React Hook theo dõi số lượng tác vụ đang chờ đồng bộ trong hàng đợi Outbox.
+ */
+export function useSyncOutboxCount(): number {
+  const [count, setCount] = useState<number>(() => getPendingOutboxCount());
+
+  useEffect(() => {
+    const unsubscribe = subscribeOutbox(() => {
+      setCount(getPendingOutboxCount());
+    });
+    return unsubscribe;
+  }, []);
+
+  return count;
 }
 
 /**
@@ -258,20 +284,4 @@ export async function processSyncQueue(
   }
 
   return { done: doneCount, failed: failedCount };
-}
-
-/**
- * React Hook theo dõi số lượng tác vụ đang chờ đồng bộ trong hàng đợi Outbox.
- */
-export function useSyncOutboxCount(): number {
-  const [count, setCount] = useState<number>(() => getPendingOutboxCount());
-
-  useEffect(() => {
-    const unsubscribe = subscribeOutbox(() => {
-      setCount(getPendingOutboxCount());
-    });
-    return unsubscribe;
-  }, []);
-
-  return count;
 }
