@@ -194,3 +194,25 @@ CREATE POLICY "Users can update their own profile"
 -- TUYỆT ĐỐI KHÔNG tạo Policy INSERT hoặc DELETE cho client.
 -- - Việc INSERT hồ sơ do Trigger SECURITY DEFINER (on_auth_user_created) thực hiện.
 -- - Việc DELETE hồ sơ tự động được xử lý qua ràng buộc ON DELETE CASCADE khi auth.users bị xóa.
+
+-- ==============================================================================
+-- 7. TỰ ĐỘNG BACKFILL PROFILE CHO CÁC TÀI KHOẢN ĐÃ TỒN TẠI TỪ TRƯỚC
+-- ==============================================================================
+-- Ghi chú vận hành:
+-- Khi chạy migration trên project đã có sẵn tài khoản từ các phase trước (P2.1b),
+-- lệnh này đảm bảo 100% user trong auth.users đều có bản ghi profile hợp lệ ngay lập tức.
+INSERT INTO public.profiles (user_id, display_name, avatar_url, role, is_anonymous, created_at, updated_at)
+SELECT
+  u.id,
+  COALESCE(
+    NULLIF(substr(trim(COALESCE(u.raw_user_meta_data->>'full_name', u.raw_user_meta_data->>'name')), 1, 20), ''),
+    'Khách-' || substr(replace(u.id::text, '-', ''), 1, 6)
+  ) AS display_name,
+  COALESCE(u.raw_user_meta_data->>'avatar_url', u.raw_user_meta_data->>'picture') AS avatar_url,
+  'player' AS role,
+  COALESCE(u.is_anonymous, (u.raw_app_meta_data->>'provider' = 'anonymous'), false) AS is_anonymous,
+  COALESCE(u.created_at, now()) AS created_at,
+  now() AS updated_at
+FROM auth.users u
+ON CONFLICT (user_id) DO NOTHING;
+
