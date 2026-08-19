@@ -22,7 +22,13 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import type { GameViewProps } from '../types';
 import type { MatchResultReport, MatchResultParticipant } from '@engines/types';
-import { caroEngine, DEFAULT_CARO_OPTIONS, checkWinAt, type CaroState } from '@engines/caro';
+import {
+  caroEngine,
+  caroMovesCodec,
+  DEFAULT_CARO_OPTIONS,
+  checkWinAt,
+  type CaroState,
+} from '@engines/caro';
 import { InteractiveBoard, ModeSelect, MatchEndOverlay, type SessionScore } from './components';
 import type { CaroMatchConfig, CaroScreen, CaroSavedSessionExtra } from './types';
 import { getAiLevelLabel } from '../labels';
@@ -41,6 +47,7 @@ import {
   type SavedMatch,
   type LocalMatchRecord,
 } from '../../core/gameLocalData';
+import { enqueueAndSyncMatch } from '../../core/syncBootstrap';
 
 export const CaroGameView: React.FC<GameViewProps> = ({
   definition,
@@ -105,14 +112,21 @@ export const CaroGameView: React.FC<GameViewProps> = ({
   const [aiError, setAiError] = useState<string | null>(null);
   const [latestReport, setLatestReport] = useState<MatchResultReport | null>(null);
 
-  // 12. Seed ngẫu nhiên cố định cho mỗi ván đấu (để tái lập ván cờ khi debug / replay)
+  // 12. Định danh duy nhất của ván đấu (UUID do client sinh khi bắt đầu ván, phục vụ Idempotent Outbox Sync P2.5c)
+  const matchIdRef = useRef<string>(
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : '00000000-0000-4000-8000-000000000000',
+  );
+
+  // 13. Seed ngẫu nhiên cố định cho mỗi ván đấu (để tái lập ván cờ khi debug / replay)
   const matchSeedRef = useRef<string>(`caro_seed_${Date.now()}`);
 
-  // 11. Quản lý thời gian để lập MatchResultReport
+  // 14. Quản lý thời gian để lập MatchResultReport
   const startTimeRef = useRef<number>(Date.now());
   const reportSentRef = useRef<boolean>(false);
 
-  // 12. Hook quản lý Web Worker AI Cờ Caro
+  // 15. Hook quản lý Web Worker AI Cờ Caro
   const { requestMove, isThinking, cancel } = useCaroAi({ minDelayMs: 500 });
 
   // ============================================================================
@@ -261,6 +275,52 @@ export const CaroGameView: React.FC<GameViewProps> = ({
             };
           });
 
+          // 7. Đưa ván đấu vào Hàng đợi đồng bộ Outbox (Offline-first Cloud Sync P2.5c)
+          // Áp dụng cho cả vs_ai và local_pvp (Dữ liệu cloud phục vụ thống kê P2.6 và Replay P8.1)
+          const participantsParam = [
+            {
+              seatIndex: 0,
+              isBot: isVsAiMode && currentHumanSeat === 1,
+              botLevel:
+                isVsAiMode && currentHumanSeat === 1 ? (matchConfig?.aiLevel ?? 'easy') : null,
+              result:
+                winOutcome === undefined
+                  ? ('draw' as const)
+                  : winOutcome.playerIndex === 0
+                    ? ('win' as const)
+                    : ('loss' as const),
+              placement: winOutcome === undefined ? 1 : winOutcome.playerIndex === 0 ? 1 : 2,
+              score: null,
+            },
+            {
+              seatIndex: 1,
+              isBot: isVsAiMode && currentHumanSeat === 0,
+              botLevel:
+                isVsAiMode && currentHumanSeat === 0 ? (matchConfig?.aiLevel ?? 'easy') : null,
+              result:
+                winOutcome === undefined
+                  ? ('draw' as const)
+                  : winOutcome.playerIndex === 1
+                    ? ('win' as const)
+                    : ('loss' as const),
+              placement: winOutcome === undefined ? 1 : winOutcome.playerIndex === 1 ? 1 : 2,
+              score: null,
+            },
+          ];
+
+          enqueueAndSyncMatch({
+            matchId: matchIdRef.current,
+            gameId: 'caro',
+            mode: isVsAiMode ? 'vs_ai' : 'local_pvp',
+            startedAt: new Date(startTimeRef.current).toISOString(),
+            durationMs,
+            endReason: winOutcome !== undefined ? 'five_in_a_row' : 'board_full',
+            engineOptions: JSON.stringify(nextState.options),
+            finalState: caroEngine.serialize(nextState),
+            moves: caroMovesCodec.encodeMoves(movesRef.current),
+            participants: participantsParam,
+          });
+
           // Gửi báo cáo kết quả trận đấu cho GameShell / App store
           if (onGameEnd && !reportSentRef.current) {
             reportSentRef.current = true;
@@ -334,6 +394,10 @@ export const CaroGameView: React.FC<GameViewProps> = ({
     setAiError(null);
     setLatestReport(null);
     matchSeedRef.current = `caro_seed_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    matchIdRef.current =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `00000000-0000-4000-8000-${Date.now().toString(16).padStart(12, '0')}`;
     startTimeRef.current = Date.now();
     reportSentRef.current = false;
     setScreen('playing');
@@ -443,6 +507,10 @@ export const CaroGameView: React.FC<GameViewProps> = ({
     setAiError(null);
     setLatestReport(null);
     matchSeedRef.current = `caro_seed_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    matchIdRef.current =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `00000000-0000-4000-8000-${Date.now().toString(16).padStart(12, '0')}`;
     startTimeRef.current = Date.now();
     reportSentRef.current = false;
     setScreen('playing');
@@ -490,6 +558,10 @@ export const CaroGameView: React.FC<GameViewProps> = ({
     setAiError(null);
     setLatestReport(null);
     matchSeedRef.current = `caro_seed_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    matchIdRef.current =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `00000000-0000-4000-8000-${Date.now().toString(16).padStart(12, '0')}`;
     startTimeRef.current = Date.now();
     reportSentRef.current = false;
     setScreen('playing');

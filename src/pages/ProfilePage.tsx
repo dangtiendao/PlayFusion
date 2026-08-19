@@ -6,6 +6,7 @@ import { getAllGames } from '@/games/registry';
 import { hasGameData, getStats } from '@/core/gameLocalData';
 import { ConfirmDialog } from '@/components/game-shell/ConfirmDialog';
 import { getGames } from '@/repositories/catalogRepository';
+import { useSyncOutboxCount } from '@/core/syncOutbox';
 
 /**
  * ==============================================================================
@@ -45,6 +46,9 @@ export function ProfilePage() {
 
   // Kiểm chứng P2.5a — P2.6 làm thống kê online thật
   const [onlineGamesCount, setOnlineGamesCount] = useState<number | null>(null);
+
+  // Số lượng ván đấu đang chờ đồng bộ Outbox (P2.5c)
+  const pendingSyncCount = useSyncOutboxCount();
 
   useEffect(() => {
     let isMounted = true;
@@ -381,6 +385,17 @@ export function ProfilePage() {
             <p className="text-xs text-slate-500 dark:text-slate-400 italic">
               Hiện chưa có ván đấu nào được hoàn thành trên thiết bị này.
             </p>
+          </div>
+        )}
+
+        {/* Chỉ báo đồng bộ Outbox (P2.5c) */}
+        {pendingSyncCount > 0 && (
+          <div
+            data-testid="sync-pending-badge"
+            className="flex items-center justify-center gap-1.5 p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs font-semibold text-amber-800 dark:text-amber-300"
+          >
+            <span>⏳</span>
+            <span>Chờ đồng bộ: {pendingSyncCount} trận</span>
           </div>
         )}
 

@@ -7,6 +7,7 @@ import { useTheme } from '@/core/useTheme';
 import { SunIcon, MoonIcon } from '@/components/icons/NavIcons';
 import { UpdatePrompt } from '@/components/pwa/UpdatePrompt';
 import { useAuthStore } from '@/stores/authStore';
+import { initSyncBootstrap } from '@/core/syncBootstrap';
 
 /**
  * AppContent Component - Render bên trong BrowserRouter để sử dụng Router hooks.
@@ -14,11 +15,14 @@ import { useAuthStore } from '@/stores/authStore';
 function AppContent() {
   const { isDark, toggleTheme } = useTheme();
 
-  // Khởi tạo phiên xác thực (Khách ẩn danh tự động hoặc khôi phục session cũ).
-  // NGUYÊN TẮC OFFLINE-FIRST BẤT BIẾN: auth loading chạy ngầm, tuyệt đối KHÔNG chặn
+  // Khởi tạo phiên xác thực (Khách ẩn danh tự động hoặc khôi phục session cũ)
+  // và kích hoạt Hàng đợi đồng bộ Outbox (Offline-first sync bootstrap).
+  // NGUYÊN TẮC OFFLINE-FIRST BẤT BIẾN: auth và sync chạy ngầm, tuyệt đối KHÔNG chặn
   // render giao diện hay làm gián đoạn các trò chơi offline (Caro, Ô ăn quan).
   useEffect(() => {
     useAuthStore.getState().init();
+    const cleanupSync = initSyncBootstrap();
+    return cleanupSync;
   }, []);
 
   // Lọc các route được phép hiển thị trên thanh điều hướng

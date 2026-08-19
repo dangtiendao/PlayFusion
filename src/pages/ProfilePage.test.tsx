@@ -5,6 +5,7 @@ import { ProfilePage } from './ProfilePage';
 import { useAuthStore, _resetAuthStoreForTesting } from '../stores/authStore';
 import * as gameLocalDataModule from '../core/gameLocalData';
 import * as catalogRepoModule from '../repositories/catalogRepository';
+import * as syncOutboxModule from '../core/syncOutbox';
 
 describe('ProfilePage Component Tests (ProfilePage.tsx - P2.1c)', () => {
   beforeEach(() => {
@@ -201,5 +202,16 @@ describe('ProfilePage Component Tests (ProfilePage.tsx - P2.1c)', () => {
 
     expect(screen.getByTestId('server-connection-status')).not.toBeNull();
     expect(screen.getByText(/Đã kết nối máy chủ: 1 trò chơi khả dụng/i)).not.toBeNull();
+  });
+
+  it('9. Hiển thị badge "Chờ đồng bộ: {n} trận" khi có tác vụ trong hàng đợi Outbox', async () => {
+    vi.spyOn(syncOutboxModule, 'useSyncOutboxCount').mockReturnValue(3);
+
+    await act(async () => {
+      render(<ProfilePage />);
+    });
+
+    expect(screen.getByTestId('sync-pending-badge')).not.toBeNull();
+    expect(screen.getByText(/Chờ đồng bộ: 3 trận/i)).not.toBeNull();
   });
 });
