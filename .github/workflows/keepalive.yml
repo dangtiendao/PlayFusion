@@ -1,0 +1,149 @@
+name: Supabase Anti-Pause Keepalive
+
+# ==============================================================================
+# WORKFLOW GIỮ NHỊP TIM DATABASE (ANTI-PAUSE CRON - P2.7a)
+# ==============================================================================
+#
+# ⚠️ CẢNH BÁO QUAN TRỌNG VỀ GITHUB ACTIONS SCHEDULER:
+# 1. GitHub tự động vô hiệu hóa (disable) scheduled workflows nếu repository không
+#    có bất kỳ commit hoạt động nào trong vòng 60 ngày liên tục.
+# 2. Để phòng ngừa, workflow này tích hợp step "Self-touch" gửi API request kích hoạt
+#    lại chính nó mỗi lần chạy.
+# 3. QUY TẮC DỰ PHÒNG: Định kỳ kiểm tra tab Actions ít nhất 1 lần/tháng để đảm bảo
+#    lịch chạy vẫn đang hoạt động.
+#
+# CƠ CHẾ HOẠT ĐỘNG:
+# - Supabase Free Tier tự động PAUSE project sau 7 ngày không có API/Database activity.
+# - Workflow này chạy định kỳ mỗi 3 ngày (tối ưu, nhỏ hơn ngưỡng 7 ngày) gửi truy vấn
+#   REST PostgREST trực tiếp vào bảng `public.games` với `service_role` key.
+# - Truy vấn này tạo transaction và API request thật sự trong PostgreSQL engine.
+# - Nếu có lỗi kết nối (HTTP != 200 hoặc JSON sai cấu trúc), workflow sẽ thất bại (exit 1)
+#   và GitHub Actions sẽ tự động gửi email cảnh báo tới chủ sở hữu repository.
+# ==============================================================================
+
+on:
+  schedule:
+    # Chạy mỗi 3 ngày lúc 21:17 UTC (04:17 sáng giờ VN)
+    # Khung giờ lẻ (phút 17) giúp tránh tắc nghẽn hàng đợi GitHub Actions runner
+    - cron: '17 21 */3 * *'
+  workflow_dispatch:
+    # Cho phép kích hoạt thủ công từ giao diện GitHub Actions để kiểm thử
+
+concurrency:
+  group: keepalive-supabase
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    name: Ping Database Keepalive (${{ matrix.environment }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [dev, prod]
+
+    steps:
+      - name: 1. Nạp biến môi trường & Masking Secrets bảo mật
+        id: setup
+        env:
+          DEV_URL: ${{ secrets.KEEPALIVE_SUPABASE_URL_DEV }}
+          DEV_KEY: ${{ secrets.KEEPALIVE_SERVICE_ROLE_DEV }}
+          PROD_URL: ${{ secrets.KEEPALIVE_SUPABASE_URL_PROD }}
+          PROD_KEY: ${{ secrets.KEEPALIVE_SERVICE_ROLE_PROD }}
+        run: |
+          if [ "${{ matrix.environment }}" = "dev" ]; then
+            URL="$DEV_URL"
+            KEY="$DEV_KEY"
+          else
+            URL="$PROD_URL"
+            KEY="$PROD_KEY"
+          fi
+
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then
+            echo "❌ [ERROR] Thiếu secret cho môi trường ${{ matrix.environment }}:"
+            echo "   Vui lòng cấu hình KEEPALIVE_SUPABASE_URL_${{ matrix.environment }} và KEEPALIVE_SERVICE_ROLE_${{ matrix.environment }} trong GitHub Repository Secrets."
+            exit 1
+          fi
+
+          # Thêm mask để GitHub Actions tự động ẩn thông tin nhạy cảm khỏi log
+          echo "::add-mask::$URL"
+          echo "::add-mask::$KEY"
+
+          # Xuất ra file môi trường tạm thời cho các step sau
+          echo "TARGET_URL=$URL" >> $GITHUB_ENV
+          echo "TARGET_KEY=$KEY" >> $GITHUB_ENV
+
+      - name: 2. Gửi truy vấn PostgREST giữ nhịp tim (Retry 3 lần)
+        id: keepalive_ping
+        run: |
+          MAX_RETRIES=3
+          RETRY_DELAY=30
+          ATTEMPT=1
+          SUCCESS=0
+
+          ENDPOINT="${TARGET_URL}/rest/v1/games?select=id&limit=1"
+
+          echo "🚀 [KEEPALIVE] Bắt đầu giữ nhịp tim Supabase (${{ matrix.environment }})..."
+          echo "   Thời điểm (UTC): $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+
+          while [ $ATTEMPT -le $MAX_RETRIES ]; do
+            echo "📡 [Lần thử $ATTEMPT/$MAX_RETRIES] Đang gửi yêu cầu tới DB..."
+            
+            # Gửi request với curl, ghi nhận HTTP Status và Latency (giây)
+            # Dùng cờ -s (silent) để không in raw headers hoặc payload ra console
+            START_TIME=$(date +%s%N)
+            RESPONSE=$(curl -s -w "\n%{http_code}" \
+              -H "apikey: ${TARGET_KEY}" \
+              -H "Authorization: Bearer ${TARGET_KEY}" \
+              -H "Content-Type: application/json" \
+              --connect-timeout 10 \
+              --max-time 15 \
+              "$ENDPOINT")
+            END_TIME=$(date +%s%N)
+
+            # Tính toán độ trễ mili-giây
+            LATENCY_MS=$(( (END_TIME - START_TIME) / 1000000 ))
+
+            # Tách HTTP status code (dòng cuối cùng) và JSON body
+            HTTP_STATUS=$(echo "$RESPONSE" | tail -n1)
+            JSON_BODY=$(echo "$RESPONSE" | sed '$d')
+
+            echo "   -> Mã phản hồi HTTP: $HTTP_STATUS"
+            echo "   -> Độ trễ mạng: ${LATENCY_MS} ms"
+
+            # Kiểm tra HTTP 200 và response JSON hợp lệ (chứa thuộc tính id)
+            if [ "$HTTP_STATUS" = "200" ] && echo "$JSON_BODY" | grep -q '"id"'; then
+              echo "✅ [SUCCESS] Kết nối Database (${{ matrix.environment }}) thành công! Dự án hoạt động bình thường."
+              SUCCESS=1
+              break
+            else
+              echo "⚠️ [WARN] Lần thử $ATTEMPT thất bại (HTTP: $HTTP_STATUS). Phản hồi không đạt kỳ vọng."
+              if [ $ATTEMPT -lt $MAX_RETRIES ]; then
+                echo "   Chờ ${RETRY_DELAY}s trước khi thử lại..."
+                sleep $RETRY_DELAY
+              fi
+            fi
+
+            ATTEMPT=$((ATTEMPT + 1))
+          done
+
+          if [ $SUCCESS -ne 1 ]; then
+            echo "❌ [FATAL] Cả $MAX_RETRIES lần thử giữ nhịp tim môi trường ${{ matrix.environment }} đều thất bại!"
+            echo "   Hệ thống sẽ văng lỗi để kích hoạt gửi email cảnh báo cho quản trị viên."
+            exit 1
+          fi
+
+      - name: 3. Tự động kích hoạt lại Workflow (Chống GitHub 60-Day Inactivity)
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🔄 [SELF-TOUCH] Kích hoạt duy trì trạng thái hoạt động của workflow..."
+          curl -s -X PUT \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/keepalive.yml/enable" \
+            > /dev/null || true
+          echo "✅ [SELF-TOUCH] Hoàn tất bước duy trì workflow."

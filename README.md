@@ -121,3 +121,35 @@ Dự án sử dụng **Supabase** (PostgreSQL, Auth, Realtime, Edge Functions) l
 - **`anon` / `public` key**: Khóa công khai an toàn để nhúng vào frontend client nhờ cơ chế phân quyền cấp hàng **Row Level Security (RLS)** trên database.
 - **`service_role` key**: Khóa đặc quyền tối cao bỏ qua RLS. **TUYỆT ĐỐI KHÔNG BAO GIỜ** nhúng vào frontend hay commit lên Git repository.
 - **Quy tắc cổng thoát hiểm (`src/repositories/`)**: Mọi tương tác với Supabase client bắt buộc phải bọc qua tầng Repository (`src/repositories/`). Tuyệt đối cấm các tầng UI/Store/Engine import trực tiếp `@supabase/supabase-js` (được kiểm soát tự động bởi `npm run check:deps`).
+
+---
+
+## Vận hành & Bảo vệ Dữ liệu (Operations - P2.7)
+
+### 1. Giữ nhịp tim chống Pause (Anti-Pause Keepalive)
+
+- **Workflow**: [`.github/workflows/keepalive.yml`](.github/workflows/keepalive.yml)
+- **Tần suất**: Tự động chạy mỗi 3 ngày (`17 21 */3 * *` UTC) hoặc chạy thủ công qua `workflow_dispatch`.
+- **Mục đích**: Supabase Free Tier tự động tạm dừng (pause) sau 7 ngày không có API activity. Workflow này gửi truy vấn REST PostgREST định kỳ vào bảng `public.games` với `service_role` key trên cả 2 môi trường `dev` và `prod` để duy trì dự án luôn hoạt động.
+
+### 2. Sao lưu Cơ sở dữ liệu & Mã hóa (Database Backup & Encryption)
+
+- **Workflow**: [`.github/workflows/backup.yml`](.github/workflows/backup.yml)
+- **Tần suất**: Tự động chạy vào tối Chủ Nhật hàng tuần (`23 20 * * 0` UTC) hoặc chạy thủ công qua `workflow_dispatch`.
+- **Bảo mật mã hóa**: Bản dump PostgreSQL được nén và mã hóa bằng thuật toán `OpenSSL AES-256-CBC` (PBKDF2 100k rounds) với khóa bí mật từ GitHub Secrets (`BACKUP_ENCRYPTION_KEY`) ngay trên runner trước khi đẩy về kho lưu trữ độc lập. File thô bị xóa sạch ngay lập tức.
+- **Kho lưu trữ độc lập & Retention**: Lưu trữ trong repository private riêng biệt (`webgamehub-backups`) qua SSH Deploy Key, tự động giữ 8 bản backup mới nhất (~8 tuần gần nhất).
+
+### 3. Hướng dẫn Giải mã Bản sao lưu
+
+Khi cần khôi phục dữ liệu từ bản sao lưu `.dump.enc`:
+
+```bash
+# Cấp quyền thực thi cho script
+chmod +x scripts/decrypt-backup.sh
+
+# Chạy giải mã (nhập Passphrase khi được nhắc):
+./scripts/decrypt-backup.sh webgamehub-prod-20260819-2000.dump.enc
+
+# Kiểm tra cấu trúc bản dump đã giải mã:
+pg_restore --list webgamehub-prod-20260819-2000.dump
+```

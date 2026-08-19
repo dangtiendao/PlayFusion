@@ -1,0 +1,215 @@
+name: Supabase Database Backup & Encryption
+
+# ==============================================================================
+# WORKFLOW SAO LƯU DỮ LIỆU ĐỊNH KỲ (BACKUP & ENCRYPTION - P2.7b)
+# ==============================================================================
+#
+# NGUYÊN TẮC BẢO VỆ DỮ LIỆU BẤT BIẾN:
+# 1. MÃ HÓA TRƯỚC KHI RỜI RUNNER:
+#    - Toàn bộ bản dump được mã hóa bằng thuật toán OpenSSL AES-256-CBC (PBKDF2,
+#      100,000 iterations, có salt) ngay trên runner trước khi lưu trữ.
+#    - File thô (.dump) bị xóa sạch ngay sau khi mã hóa hoàn tất.
+# 2. LƯU TRỮ ĐỘC LẬP (AIR-GAPPED REPO):
+#    - Bản dump mã hóa (.dump.enc) được đẩy sang repository private riêng biệt
+#      (mặc định: `webgamehub-backups`) qua SSH Deploy Key có quyền ghi riêng.
+#    - Việc đẩy sang repo backup là máy (Bot) đẩy dữ liệu, KHÔNG vi phạm quy tắc
+#      "không tự ý push mã nguồn của repo code".
+# 3. CHÍNH SÁCH LƯU TRỮ (RETENTION POLICY):
+#    - Tự động lưu giữ 8 bản backup gần nhất (~8 tuần) cho mỗi môi trường.
+#    - Các bản ghi cũ hơn tự động được dọn dẹp để tối ưu dung lượng lưu trữ.
+# 4. GIỚI HẠN PHẠM VI SCHEMA:
+#    - Lệnh pg_dump sao lưu toàn bộ schema `public` (15 bảng, triggers, functions,
+#      và RLS policies). Schema nội bộ `auth.users` do Supabase quản lý riêng
+#      và không nằm trong schema public (quy trình khôi phục xem runbook P2.7c).
+# ==============================================================================
+
+on:
+  schedule:
+    # Chạy tự động hàng tuần vào 20:23 UTC tối Chủ Nhật (03:23 sáng Thứ Hai giờ VN)
+    - cron: '23 20 * * 0'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Chọn môi trường cần sao lưu (prod / dev / both)'
+        required: true
+        default: 'prod'
+        type: choice
+        options:
+          - prod
+          - dev
+          - both
+
+concurrency:
+  group: backup-supabase
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: Backup & Encrypt Database
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 1. Xác định danh sách môi trường cần sao lưu
+        id: env_matrix
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            # Chạy tự động theo lịch: Chỉ backup PROD (Dev có thể tái tạo từ migrations)
+            echo "TARGET_ENVS=prod" >> $GITHUB_ENV
+          else
+            SELECTED="${{ github.event.inputs.environment }}"
+            if [ "$SELECTED" = "both" ]; then
+              echo "TARGET_ENVS=prod dev" >> $GITHUB_ENV
+            else
+              echo "TARGET_ENVS=$SELECTED" >> $GITHUB_ENV
+            fi
+          fi
+
+      - name: 2. Cài đặt PostgreSQL Client Tool (pg_dump)
+        run: |
+          echo "📦 [SETUP] Đang cài đặt postgresql-client..."
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+          echo "✅ [SETUP] Phiên bản pg_dump:"
+          pg_dump --version
+
+      - name: 3. Thiết lập SSH Deploy Key cho Repo Backup
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.BACKUP_DEPLOY_KEY }}
+        run: |
+          if [ -z "$SSH_PRIVATE_KEY" ]; then
+            echo "❌ [ERROR] Thiếu secret BACKUP_DEPLOY_KEY (SSH Private Key cho repo backup)."
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa_backup
+          chmod 600 ~/.ssh/id_rsa_backup
+
+          # Thêm GitHub vào danh sách known_hosts an toàn
+          ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> ~/.ssh/known_hosts
+
+          # Cấu hình SSH để sử dụng key riêng cho repo backup
+          cat << 'EOF' >> ~/.ssh/config
+          Host github.com-backup
+            HostName github.com
+            User git
+            IdentityFile ~/.ssh/id_rsa_backup
+            IdentitiesOnly yes
+          EOF
+
+      - name: 4. Thực thi Sao lưu, Mã hóa và Lưu trữ
+        env:
+          DB_URL_PROD: ${{ secrets.BACKUP_DB_URL_PROD }}
+          DB_URL_DEV: ${{ secrets.BACKUP_DB_URL_DEV }}
+          ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+          BACKUP_REPO: ${{ secrets.BACKUP_REPO_NAME || 'dangtiendao/webgamehub-backups' }}
+        run: |
+          if [ -z "$ENCRYPTION_KEY" ]; then
+            echo "❌ [ERROR] Thiếu secret BACKUP_ENCRYPTION_KEY (Passphrase mã hóa AES-256)."
+            exit 1
+          fi
+
+          # Che giấu khóa mã hóa và connection strings khỏi log
+          echo "::add-mask::$ENCRYPTION_KEY"
+          if [ -n "$DB_URL_PROD" ]; then echo "::add-mask::$DB_URL_PROD"; fi
+          if [ -n "$DB_URL_DEV" ]; then echo "::add-mask::$DB_URL_DEV"; fi
+
+          # Clone shallow repo backup
+          echo "📥 [GIT] Đang kết nối tới kho lưu trữ backup: $BACKUP_REPO..."
+          git clone --depth 1 "git@github.com-backup:${BACKUP_REPO}.git" backup-repo-dir
+
+          TIMESTAMP=$(date -u +"%Y%m%d-%H%M")
+          DATE_LOG=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+          for ENV in $TARGET_ENVS; do
+            echo "=================================================================="
+            echo "🚀 [BACKUP] Bắt đầu sao lưu môi trường: $ENV ($DATE_LOG)"
+            echo "=================================================================="
+
+            if [ "$ENV" = "prod" ]; then
+              CONN_STR="$DB_URL_PROD"
+            else
+              CONN_STR="$DB_URL_DEV"
+            fi
+
+            if [ -z "$CONN_STR" ]; then
+              echo "❌ [ERROR] Thiếu connection string cho môi trường $ENV (BACKUP_DB_URL_${ENV^^})."
+              exit 1
+            fi
+
+            RAW_FILE="raw_${ENV}_${TIMESTAMP}.dump"
+            ENC_FILE_NAME="webgamehub-${ENV}-${TIMESTAMP}.dump.enc"
+            ENC_FILE_PATH="backup-repo-dir/${ENV}/${ENC_FILE_NAME}"
+
+            mkdir -p "backup-repo-dir/${ENV}"
+
+            # Step 4a: Chạy pg_dump
+            # Cờ:
+            # - --format=custom (-Fc): Định dạng nhị phân pg_dump nén sẵn, cho phép khôi phục linh hoạt
+            # - --schema=public: Giới hạn schema public (bảo toàn bảng, triggers, functions, policies)
+            # - --no-owner: Bỏ qua lệnh gán quyền sở hữu role nội bộ
+            # - --no-privileges (-x): Bỏ qua lệnh cấp quyền GRANT/REVOKE hệ thống
+            echo "📡 [1/3] Đang dump dữ liệu từ PostgreSQL qua Session Pooler..."
+            pg_dump "$CONN_STR" \
+              --format=custom \
+              --schema=public \
+              --no-owner \
+              --no-privileges \
+              --file="$RAW_FILE"
+
+            if [ ! -f "$RAW_FILE" ] || [ ! -s "$RAW_FILE" ]; then
+              echo "❌ [ERROR] File dump rỗng hoặc không được tạo thành công!"
+              exit 1
+            fi
+
+            RAW_SIZE=$(du -h "$RAW_FILE" | cut -f1)
+            echo "   -> Kích thước bản dump thô: $RAW_SIZE"
+
+            # Step 4b: Mã hóa OpenSSL AES-256-CBC
+            echo "🔐 [2/3] Đang mã hóa AES-256-CBC với PBKDF2 (100k iterations)..."
+            openssl enc -aes-256-cbc -pbkdf2 -iter 100000 -salt \
+              -in "$RAW_FILE" \
+              -out "$ENC_FILE_PATH" \
+              -pass pass:"$ENCRYPTION_KEY"
+
+            # XÓA NGAY FILE THÔ ĐỂ BẢO VỆ DỮ LIỆU
+            rm -f "$RAW_FILE"
+            echo "   -> Đã xóa an toàn file dump thô khỏi runner."
+
+            ENC_SIZE=$(du -h "$ENC_FILE_PATH" | cut -f1)
+            SHA256_HASH=$(sha256sum "$ENC_FILE_PATH" | awk '{print $1}')
+
+            echo "   -> Tên file mã hóa: $ENC_FILE_NAME"
+            echo "   -> Kích thước mã hóa: $ENC_SIZE"
+            echo "   -> SHA-256 Checksum: $SHA256_HASH"
+
+            # Step 4c: Áp dụng Chính sách Lưu trữ Retention (Giữ 8 bản mới nhất)
+            echo "🧹 [3/3] Áp dụng chính sách Retention (Giữ tối đa 8 bản mới nhất)..."
+            cd "backup-repo-dir/${ENV}"
+            # Liệt kê file sắp xếp theo thời gian giảm dần, xóa từ file thứ 9 trở đi
+            DELETED_COUNT=0
+            for old_file in $(ls -t *.dump.enc 2>/dev/null | tail -n +9); do
+              echo "   - Xóa bản backup cũ: $old_file"
+              rm -f "$old_file"
+              DELETED_COUNT=$((DELETED_COUNT + 1))
+            done
+            cd ../..
+            echo "   -> Đã dọn dẹp $DELETED_COUNT bản backup cũ vượt quá chu kỳ 8 tuần."
+          done
+
+          # Step 4d: Commit và Push vào Repo Backup
+          echo "📤 [GIT] Đang đẩy các bản backup mã hóa lên repo lưu trữ..."
+          cd backup-repo-dir
+          git config user.name "PlayFusion Backup Bot"
+          git config user.email "backup-bot@playfusion.local"
+          git add .
+
+          if git diff --staged --quiet; then
+            echo "ℹ️ [GIT] Không có thay đổi nào cần commit."
+          else
+            git commit -m "chore(backup): automated database backup ${TIMESTAMP} (UTC)"
+            git push origin HEAD
+            echo "✅ [SUCCESS] Đã lưu trữ bản sao lưu mã hóa an toàn vào kho backup!"
+          fi
+          cd ..
