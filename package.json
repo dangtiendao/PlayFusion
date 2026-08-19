@@ -20,6 +20,7 @@
     "test:coverage": "vitest run --coverage",
     "check:deps": "depcruise src packages/engines --config .dependency-cruiser.cjs",
     "check:deps:graph": "depcruise src packages/engines --include-only \"^(src|packages/engines)\" --output-type html --config .dependency-cruiser.cjs > docs/dependency-graph.html",
+    "check:games": "npx tsx scripts/check-games-sync.ts",
     "prepare": "husky"
   },
   "lint-staged": {
