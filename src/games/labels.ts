@@ -146,3 +146,69 @@ export function getAiLevelLabel(level: AiLevel): string {
 export function getAiLevelDescription(level: AiLevel): string {
   return AI_LEVEL_DESCRIPTIONS[level] ?? '';
 }
+
+/**
+ * Lấy nhãn tiếng Việt cho một modeKey tổng hợp (ví dụ: 'vs_ai:hard', 'local_pvp', 'vs_ai:all').
+ */
+export function getModeKeyLabel(modeKey: string): string {
+  if (modeKey === 'vs_ai:all') {
+    return 'Đấu máy (Tất cả cấp độ)';
+  }
+
+  if (modeKey.startsWith('vs_ai:')) {
+    const levelKey = modeKey.split(':')[1] as AiLevel;
+    const levelName = AI_LEVEL_LABELS[levelKey] ?? levelKey;
+    return `Đấu máy (${levelName})`;
+  }
+
+  if (modeKey in MODE_LABELS) {
+    return MODE_LABELS[modeKey as GameMode];
+  }
+
+  return modeKey;
+}
+
+export interface OutcomeVisualConfig {
+  readonly label: string;
+  readonly icon: string;
+  readonly badgeClass: string;
+}
+
+/**
+ * Lấy cấu hình nhãn và màu sắc hiển thị cho kết quả trận đấu ('win', 'loss', 'draw', 'neutral').
+ */
+export function getOutcomeConfig(
+  result: 'win' | 'loss' | 'draw' | 'neutral' | null | undefined,
+): OutcomeVisualConfig {
+  switch (result) {
+    case 'win':
+      return {
+        label: 'Thắng',
+        icon: '✓',
+        badgeClass:
+          'text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-800',
+      };
+    case 'loss':
+      return {
+        label: 'Thua',
+        icon: '✗',
+        badgeClass:
+          'text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-950/60 border-rose-200 dark:border-rose-800',
+      };
+    case 'draw':
+      return {
+        label: 'Hòa',
+        icon: '=',
+        badgeClass:
+          'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/60 border-amber-200 dark:border-amber-800',
+      };
+    case 'neutral':
+    default:
+      return {
+        label: 'Đối kháng',
+        icon: '👥',
+        badgeClass:
+          'text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700',
+      };
+  }
+}
