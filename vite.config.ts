@@ -138,7 +138,7 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['**/*.{test,spec}.{ts,tsx}'],
-    exclude: ['tests/rls/**', 'supabase/**', 'node_modules/**', 'dist/**'],
+    exclude: ['tests/rls/**', 'tests/integration/**', 'supabase/**', 'node_modules/**', 'dist/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
@@ -148,6 +148,7 @@ export default defineConfig({
         '**/*.spec.{ts,tsx}',
         '**/*.d.ts',
         'tests/rls/**',
+        'tests/integration/**',
         'supabase/**',
       ],
     },

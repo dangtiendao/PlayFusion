@@ -19,6 +19,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:rls": "vitest run --config vitest.rls.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:deno": "deno test supabase/functions/tests/",
     "check:deps": "depcruise src packages/engines --config .dependency-cruiser.cjs",
     "check:deps:graph": "depcruise src packages/engines --include-only \"^(src|packages/engines)\" --output-type html --config .dependency-cruiser.cjs > docs/dependency-graph.html",
