@@ -113,8 +113,8 @@ describe('Kiểm Tra Bất Biến Kiến Trúc (Architecture Invariants Test - P
     const deepTransportPatterns = [
       'src/transport/matchChannel',
       '@/transport/matchChannel',
-      'src/transport/types',
-      '@/transport/types',
+      'src/transport/useMatchChannel',
+      '@/transport/useMatchChannel',
     ];
 
     const violations: { file: string; line: number; content: string }[] = [];

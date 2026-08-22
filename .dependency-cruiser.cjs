@@ -107,19 +107,20 @@ module.exports = {
     // =========================================================================
     // 7. LUẬT BẢO VỆ TẦNG TRANSPORT: CẤM IMPORT SÂU VÀO FILE NỘI BỘ TRONG src/transport
     // Lý do: Các tầng khác (pages, games, components, stores, core) chỉ được phép
-    // import API công khai xuất khẩu từ src/transport/index.ts (hoặc alias '@/transport').
+    // import API công khai xuất khẩu từ src/transport/index.ts (hoặc alias '@/transport')
+    // hoặc hợp đồng types từ src/transport/types.ts.
     // Cấm tuyệt đối import trực tiếp vào các file thực thi nội bộ (như matchChannel.ts).
     // =========================================================================
     {
       name: 'no-deep-transport-imports',
       severity: 'error',
       comment:
-        'VI PHẠM KIẾN TRÚC: Cấm import sâu vào các file nội bộ trong src/transport/. Mọi module bên ngoài chỉ được import API công khai từ src/transport/index.ts hoặc src/transport.',
+        'VI PHẠM KIẾN TRÚC: Cấm import sâu vào các file nội bộ trong src/transport/. Mọi module bên ngoài chỉ được import API công khai từ src/transport/index.ts hoặc types từ src/transport/types.ts.',
       from: {
         path: '^(src/(?!transport)|packages)',
       },
       to: {
-        path: '^src/transport/(?!index(\\.ts)?$)',
+        path: '^src/transport/(?!index(\\.ts)?$|types(\\.ts)?$)',
       },
     },
   ],

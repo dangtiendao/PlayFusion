@@ -12,6 +12,7 @@
  * ==============================================================================
  */
 
+// 1. Lõi Transport Thuần (P3.1a)
 export { createMatchChannel, type MatchChannel } from './matchChannel';
 export type {
   ChannelStatus,
@@ -19,3 +20,22 @@ export type {
   PresenceMember,
   MatchChannelHandlers,
 } from './types';
+
+// 2. React Hook Quản Lý Vòng Đời (P3.1b)
+export {
+  useMatchChannel,
+  type UseMatchChannelOptions,
+  type UseMatchChannelResult,
+} from './useMatchChannel';
+
+// 3. Selectors & Store Phản Chiếu Trạng Thái (P3.1b)
+export {
+  useTransportStore,
+  useTransportStatus,
+  useChannelMembers,
+  useTransportActiveChannelId,
+  useTransportLastError,
+  type TransportState,
+  type TransportActions,
+  type TransportStore,
+} from '@/stores/transportStore';
