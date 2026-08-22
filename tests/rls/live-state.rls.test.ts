@@ -27,7 +27,6 @@ import {
   userBClient,
   anonClient,
   serviceClient,
-  userAId,
   userBId,
   DEV_SUPABASE_URL,
   DEV_ANON_KEY,
@@ -84,19 +83,22 @@ describe('RLS Security Suite: match_live_state & create_test_online_match (P3.2b
     await teardownRlsTestContext();
   });
 
-  it('1. [RPC: create_test_online_match] userA tạo ván online với userB thành công', async () => {
+  it('1. [Setup Match] userA tạo phòng và userB join phòng thành công để khởi tạo ván đấu', async () => {
     if (!isRlsTestConfigured()) return;
 
-    const { data: matchId, error } = await userAClient.rpc('create_test_online_match', {
-      p_opponent_id: userBId,
+    const { data: createRes, error: createErr } = await userAClient.rpc('create_room', {
+      p_game_id: 'caro',
     });
+    expect(createErr).toBeNull();
+    const code = createRes[0].code;
 
-    expect(error).toBeNull();
-    expect(matchId).toBeDefined();
-    expect(typeof matchId).toBe('string');
-    createdMatchId = matchId as string;
+    const { data: joinRes, error: joinErr } = await userBClient.rpc('join_room', {
+      p_code: code,
+    });
+    expect(joinErr).toBeNull();
+    createdMatchId = joinRes[0].match_id;
 
-    // Kiểm tra match_participants đã có 2 bản ghi (Seat 0: userA, Seat 1: userB)
+    // Kiểm tra match_participants đã có 2 bản ghi (Seat 0 và Seat 1)
     const { data: participants } = await serviceClient
       .from('match_participants')
       .select('*')
@@ -196,20 +198,10 @@ describe('RLS Security Suite: match_live_state & create_test_online_match (P3.2b
     );
   });
 
-  it('6. [RPC: create_test_online_match] userA tạo trận với chính mình -> BỊ TỪ CHỐI', async () => {
+  it('6. [RPC: create_test_online_match] ĐÃ DROP -> Gọi RPC ném lỗi function not found', async () => {
     if (!isRlsTestConfigured()) return;
 
     const { error } = await userAClient.rpc('create_test_online_match', {
-      p_opponent_id: userAId,
-    });
-
-    expect(error).not.toBeNull();
-  });
-
-  it('7. [RPC: create_test_online_match] anon client gọi RPC -> BỊ CHẶN 42501', async () => {
-    if (!isRlsTestConfigured()) return;
-
-    const { error } = await anonClient.rpc('create_test_online_match', {
       p_opponent_id: userBId,
     });
 

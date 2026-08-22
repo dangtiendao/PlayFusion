@@ -24,13 +24,13 @@ import {
   userAClient,
   userBClient,
   serviceClient,
-  userBId,
 } from '../rls/setup';
 
 describe.runIf(isRlsTestConfigured())(
   'Referee Server-side End-to-End Integration Tests (P3.2d - DEV Database)',
   () => {
     let matchId = '';
+    let roomCode = '';
 
     beforeAll(async () => {
       await setupRlsTestContext();
@@ -38,6 +38,9 @@ describe.runIf(isRlsTestConfigured())(
 
     afterAll(async () => {
       // Dọn dẹp dữ liệu trận đấu test nếu có
+      if (roomCode) {
+        await serviceClient.from('rooms').delete().eq('code', roomCode);
+      }
       if (matchId) {
         await serviceClient.from('match_live_state').delete().eq('match_id', matchId);
         await serviceClient.from('match_participants').delete().eq('match_id', matchId);
@@ -46,16 +49,19 @@ describe.runIf(isRlsTestConfigured())(
       await cleanupRlsTestContext();
     });
 
-    it('1. Tạo trận online 1v1 qua RPC và khởi tạo referee init', async () => {
-      // 1.1 Tạo trận đấu giữa User A và User B
-      const { data: createdMatchId, error: rpcError } = await userAClient.rpc(
-        'create_test_online_match',
-        { p_opponent_id: userBId },
-      );
+    it('1. Tạo trận online 1v1 qua phòng đấu và khởi tạo referee init', async () => {
+      // 1.1 Tạo phòng và join phòng giữa User A và User B
+      const { data: createRes, error: createErr } = await userAClient.rpc('create_room', {
+        p_game_id: 'caro',
+      });
+      expect(createErr).toBeNull();
+      roomCode = createRes[0].code;
 
-      expect(rpcError).toBeNull();
-      expect(createdMatchId).toBeTruthy();
-      matchId = createdMatchId as string;
+      const { data: joinRes, error: joinErr } = await userBClient.rpc('join_room', {
+        p_code: roomCode,
+      });
+      expect(joinErr).toBeNull();
+      matchId = joinRes[0].match_id;
 
       // 1.2 Gọi action 'init' từ User A
       const { data: initRes, error: initErr } = await userAClient.functions.invoke('referee', {
