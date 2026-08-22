@@ -36,6 +36,9 @@ const ProfilePage = lazy(() => import('@/pages/ProfilePage'));
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'));
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
 
+// DEMO P3.1c — Sẽ GỠ BỎ ở Phase P3.3 khi hoàn thành màn hình phòng đấu thật
+const TransportDemoPage = lazy(() => import('@/pages/dev/TransportDemo'));
+
 /**
  * NGUỒN CẤU HÌNH ROUTE DUY NHẤT TOÀN DỰ ÁN
  */
@@ -93,6 +96,16 @@ export const APP_ROUTES: readonly RouteConfig[] = [
       </Suspense>
     ),
     showInNav: true,
+  },
+  {
+    path: '/dev/transport-demo',
+    label: 'Chẩn đoán Realtime Transport',
+    element: (
+      <Suspense fallback={<LoadingSpinner message="Đang tải trang chẩn đoán..." />}>
+        <TransportDemoPage />
+      </Suspense>
+    ),
+    showInNav: false,
   },
   {
     path: '*',

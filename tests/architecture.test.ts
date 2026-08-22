@@ -26,11 +26,12 @@ describe('Kiểm Tra Bất Biến Kiến Trúc (Architecture Invariants Test - P
     return results;
   }
 
-  it('1. BẰNG CHỨNG DoD GỐC: Tuyệt đối KHÔNG module nào ngoài src/repositories/ được import @supabase/supabase-js', () => {
+  it('1. BẰNG CHỨNG DoD GỐC: Tuyệt đối KHÔNG module nào ngoài src/repositories/ và src/transport/ được import @supabase/supabase-js hoặc supabaseClient', () => {
     const allFiles = [...getAllSourceFiles(srcDir), ...getAllSourceFiles(packagesDir)];
     const forbiddenImports = [
       '@supabase/supabase-js',
       'src/repositories/supabaseClient',
+      '@/repositories/supabaseClient',
       './supabaseClient',
       '../repositories/supabaseClient',
     ];
@@ -40,8 +41,12 @@ describe('Kiểm Tra Bất Biến Kiến Trúc (Architecture Invariants Test - P
     for (const filePath of allFiles) {
       const relPath = path.relative(rootDir, filePath).replace(/\\/g, '/');
 
-      // Bỏ qua thư mục repositories và các file test RLS (chạy trực tiếp trên test DB)
-      if (relPath.startsWith('src/repositories/') || relPath.startsWith('tests/rls/')) {
+      // Bỏ qua thư mục repositories, transport và các file test RLS
+      if (
+        relPath.startsWith('src/repositories/') ||
+        relPath.startsWith('src/transport/') ||
+        relPath.startsWith('tests/rls/')
+      ) {
         continue;
       }
 
@@ -98,6 +103,54 @@ describe('Kiểm Tra Bất Biến Kiến Trúc (Architecture Invariants Test - P
       ) {
         violations.push(relPath);
       }
+    }
+
+    expect(violations).toEqual([]);
+  });
+
+  it('4. Tuyệt đối KHÔNG module nào ngoài src/transport/ được import sâu vào file nội bộ trong src/transport/ (P3.1a)', () => {
+    const allFiles = [...getAllSourceFiles(srcDir), ...getAllSourceFiles(packagesDir)];
+    const deepTransportPatterns = [
+      'src/transport/matchChannel',
+      '@/transport/matchChannel',
+      'src/transport/useMatchChannel',
+      '@/transport/useMatchChannel',
+    ];
+
+    const violations: { file: string; line: number; content: string }[] = [];
+
+    for (const filePath of allFiles) {
+      const relPath = path.relative(rootDir, filePath).replace(/\\/g, '/');
+
+      // Bỏ qua chính thư mục src/transport/ và thư mục tests/
+      if (relPath.startsWith('src/transport/') || relPath.startsWith('tests/')) {
+        continue;
+      }
+
+      const content = fs.readFileSync(filePath, 'utf8');
+      const lines = content.split('\n');
+
+      lines.forEach((line, index) => {
+        const trimmed = line.trim();
+        // Bỏ qua comment
+        if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) {
+          return;
+        }
+
+        for (const forbidden of deepTransportPatterns) {
+          if (
+            ((trimmed.startsWith('import') || trimmed.startsWith('export')) &&
+              trimmed.includes(`'${forbidden}'`)) ||
+            trimmed.includes(`"${forbidden}"`)
+          ) {
+            violations.push({
+              file: relPath,
+              line: index + 1,
+              content: trimmed,
+            });
+          }
+        }
+      });
     }
 
     expect(violations).toEqual([]);

@@ -84,21 +84,43 @@ module.exports = {
     },
 
     // =========================================================================
-    // 6. LUẬT CỔNG THOÁT HIỂM BACKEND: CHỈ src/repositories ĐƯỢC IMPORT SUPABASE
-    // Lý do: Cấm mọi module ngoài src/repositories/ import trực tiếp @supabase/supabase-js
-    // hoặc src/repositories/supabaseClient. Giữ nguyên tắc cổng thoát hiểm để dễ dàng
-    // thay đổi backend mà không sửa đổi UI/Store.
+    // 6. LUẬT CỔNG THOÁT HIỂM BACKEND: CHỈ src/repositories VÀ src/transport ĐƯỢC IMPORT SUPABASE
+    // Lý do: Cấm mọi module ngoài src/repositories/ và src/transport/ import trực tiếp
+    // @supabase/supabase-js hoặc src/repositories/supabaseClient.
+    // - src/transport ĐƯỢC PHÉP import supabaseClient từ src/repositories/ để tái dùng
+    //   Singleton client duy nhất (tránh tạo 2 client = 2 kết nối auth tốn tài nguyên + lệch session).
+    // - Toàn bộ các tầng khác (pages, games, components, stores, core) TUYỆT ĐỐI CẤM import.
     // =========================================================================
     {
-      name: 'only-repositories-can-import-supabase',
+      name: 'only-repositories-and-transport-can-import-supabase',
       severity: 'error',
       comment:
-        'VI PHẠM KIẾN TRÚC (CỔNG THOÁT HIỂM BACKEND): Cấm import @supabase/supabase-js hoặc supabaseClient ngoài thư mục src/repositories/. Toàn bộ truy cập DB/Auth phải bọc qua Repository.',
+        'VI PHẠM KIẾN TRÚC (CỔNG THOÁT HIỂM BACKEND): Cấm import @supabase/supabase-js hoặc supabaseClient ngoài thư mục src/repositories/ và src/transport/. Toàn bộ truy cập DB/Auth/Realtime phải bọc qua Repository hoặc Transport.',
       from: {
-        path: '^(src/(?!repositories)|packages)',
+        path: '^(src/(?!repositories|transport)|packages)',
       },
       to: {
         path: '(@supabase/supabase-js|src/repositories/supabaseClient)',
+      },
+    },
+
+    // =========================================================================
+    // 7. LUẬT BẢO VỆ TẦNG TRANSPORT: CẤM IMPORT SÂU VÀO FILE NỘI BỘ TRONG src/transport
+    // Lý do: Các tầng khác (pages, games, components, stores, core) chỉ được phép
+    // import API công khai xuất khẩu từ src/transport/index.ts (hoặc alias '@/transport')
+    // hoặc hợp đồng types từ src/transport/types.ts.
+    // Cấm tuyệt đối import trực tiếp vào các file thực thi nội bộ (như matchChannel.ts).
+    // =========================================================================
+    {
+      name: 'no-deep-transport-imports',
+      severity: 'error',
+      comment:
+        'VI PHẠM KIẾN TRÚC: Cấm import sâu vào các file nội bộ trong src/transport/. Mọi module bên ngoài chỉ được import API công khai từ src/transport/index.ts hoặc types từ src/transport/types.ts.',
+      from: {
+        path: '^(src/(?!transport)|packages)',
+      },
+      to: {
+        path: '^src/transport/(?!index(\\.ts)?$|types(\\.ts)?$)',
       },
     },
   ],

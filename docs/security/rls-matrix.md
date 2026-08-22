@@ -83,3 +83,27 @@
    - Trigger `protect_profile_system_fields` chặn đứng mọi nỗ lực sửa đổi `role`, `user_id`, và `is_anonymous` từ phía client.
 4. **Sổ cái Bất Biến (Append-Only Invariant)**:
    - 3 bảng chứng từ `wallet_transactions`, `purchases`, `audit_logs` được khóa cứng bằng Trigger `BEFORE UPDATE OR DELETE -> RAISE EXCEPTION`.
+
+---
+
+## 5. CHÍNH SÁCH BẢO MẬT KÊNH REALTIME (REALTIME TRANSPORT CHANNELS - P3.1a)
+
+> [!NOTE]
+> Kênh Realtime `match:{matchId}` sử dụng chế độ **Broadcast** và **Presence** của Supabase Realtime SDK, **hoàn toàn KHÔNG đi qua hệ thống RLS của các bảng PostgreSQL** (không sử dụng `postgres_changes`).
+
+### A. Phân Quyền & Đặc Tính Kênh Realtime
+
+| Tên Kênh Realtime                         | Tính Năng Sử Dụng                                                                                                            | Đối Tượng Tham Gia                  | Cơ Chế Bảo Mật & Xác Thực                                                                                                                                                                           |
+| :---------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------- | :---------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`match:{matchId}`**<br>_(Kênh ván đấu)_ | • **Broadcast**: Phát sóng nước đi, chat, ping, tín hiệu ván đấu.<br>• **Presence**: Theo dõi danh sách đấu thủ trong phòng. | `authenticated`<br>_(Đã đăng nhập)_ | • **Không đi qua RLS bảng**.<br>• Ai biết `matchId` (UUID / mã 6 ký tự) đều có thể kết nối ở tầng Transport.<br>• Client tự động lọc bỏ các payload không đúng định dạng `TransportEnvelope (v=1)`. |
+
+### B. Nguyên Tắc Bảo Mật Cốt Lõi Cho Kênh Realtime (Realtime Security Invariants)
+
+1. **Nguyên Tắc Ống Truyền Dẫn Thuần Túy (Dumb Pipe Principle)**:
+   - Tầng Realtime Transport (`src/transport/`) chỉ là đường truyền dữ liệu độ trễ thấp giữa các client và server.
+   - Client nhận thông điệp qua Broadcast **TUYỆT ĐỐI KHÔNG tin tưởng mù quáng vào `senderId` hay tính hợp lệ của `payload`**.
+2. **Xác Thực Nước Đi & Kết Quả Tại Máy Chủ (Server-side Game Referee)**:
+   - Mọi hành động có hệ quả pháp lý (nước đi hợp lệ, xác định thắng/thua/hòa, cập nhật điểm Elo, cộng/trừ xu) **BẮT BUỘC phải được thẩm định và xác nhận qua Edge Function Trọng Tài (Phase P3.2)**.
+   - Client không bao giờ tự ý ghi nhận kết quả trận đấu online trực tiếp vào DB.
+3. **Kế Hoạch Khóa Kênh Riêng Tư (Private Channel Authorization)**:
+   - Ở Phase P3.3 (Hệ thống Phòng Đấu mã 6 ký tự), hệ thống sẽ cân nhắc kích hoạt cơ chế Private Channel Authorization (xác thực quyền vào phòng qua Supabase Auth RLS/Token) để ngăn chặn người ngoài nghe lén hoặc can thiệp vào phòng thi đấu.
