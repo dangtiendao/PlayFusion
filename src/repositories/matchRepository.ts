@@ -318,3 +318,61 @@ export async function recordOfflineMatch(params: RecordOfflineMatchParams): Prom
     throw new RepoError(`Lỗi mạng khi gửi kết quả ván đấu: ${message}`, 'RETRYABLE', err);
   }
 }
+
+/**
+ * Trạng thái bàn cờ trực tiếp của ván đấu online từ bảng `match_live_state` (P3.3c).
+ */
+export interface MatchLiveStateSummary {
+  readonly stateSerialized: string;
+  readonly moveIndex: number;
+  readonly currentSeat: number;
+  readonly movesSerialized: string;
+}
+
+/**
+ * Đọc trạng thái ván đấu online thời gian thực từ bảng `public.match_live_state` (P3.3c).
+ *
+ * GHI CHÚ BẢO MẬT:
+ * - Policy RLS "Participants can read their match live state" (P3.2b) chỉ cho phép
+ *   người chơi tham gia trong bảng match_participants đọc live state của ván đấu đó.
+ *
+ * @param matchId Định danh ván đấu (UUID).
+ * @returns Trạng thái bàn cờ hiện tại hoặc `null` nếu ván đã kết thúc hoặc không tìm thấy.
+ */
+export async function getLiveState(matchId: string): Promise<MatchLiveStateSummary | null> {
+  try {
+    const { data, error } = await supabase
+      .from('match_live_state')
+      .select('state_serialized, move_index, current_seat, moves_serialized')
+      .eq('match_id', matchId)
+      .maybeSingle();
+
+    if (error) {
+      throw new RepoError(
+        `Không thể nạp trạng thái trực tiếp của ván đấu: ${error.message}`,
+        'FATAL',
+        error,
+      );
+    }
+
+    if (!data) return null;
+
+    return {
+      stateSerialized: data.state_serialized,
+      moveIndex: data.move_index,
+      currentSeat: data.current_seat,
+      movesSerialized: data.moves_serialized,
+    };
+  } catch (err: unknown) {
+    if (err instanceof RepoError) throw err;
+    const message = err instanceof Error ? err.message : 'Lỗi kết nối';
+    throw new RepoError(`Lỗi khi nạp trạng thái trực tiếp: ${message}`, 'RETRYABLE', err);
+  }
+}
+
+export const matchRepository = {
+  getMyRecentMatches,
+  getMatchById,
+  recordOfflineMatch,
+  getLiveState,
+};

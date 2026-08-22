@@ -1,30 +1,37 @@
 /**
  * ==============================================================================
- * ONLINE GAME PAGE PLACEHOLDER (SRC/PAGES/ONLINEGAMEPAGE.TSX)
+ * ONLINE GAME PAGE ROUTER (SRC/PAGES/ONLINEGAMEPAGE.TSX)
  * ==============================================================================
  *
- * MÀN HÌNH PLACEHOLDER TRẬN ĐẤU ONLINE (/game/:gameId/online/:matchId - PHASE P3.3B):
+ * MÀN HÌNH ĐIỀU HƯỚNG TRẬN ĐẤU ONLINE (/game/:gameId/online/:matchId - PHASE P3.3C):
  *
- * ⚠️ GHI CHÚ CHUYỂN TIẾP (TRANSITIONAL PLACEHOLDER):
- * - Phase P3.3b tập trung hoàn thiện luồng Tạo phòng, Nhập mã, Deep Link và Điều hướng.
- * - Màn hình này hiển thị xác nhận matchId và ghế (mySeat) đã được ghép thành công.
- * - [P3.3c THAY THẾ]: Màn hình trận đấu online chính thức tích hợp refereeRepository,
- *   useMatchChannel (Broadcast nước đi) và InteractiveBoard của từng Game Engine.
+ * 1. Với game cờ Caro (`gameId === 'caro'`):
+ *    - Mount màn hình ván đấu online chính thức `OnlineMatchScreen` tích hợp Referee
+ *      và Realtime Transport.
+ * 2. Với các game khác (chưa mở Online ở các Phase sau):
+ *    - Hiển thị màn hình chờ chuyển tiếp.
  * ==============================================================================
  */
 
 import React from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
+import { OnlineMatchScreen } from '@/games/caro/OnlineMatchScreen';
 
 export const OnlineGamePage: React.FC = () => {
   const { gameId, matchId } = useParams<{ gameId: string; matchId: string }>();
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Đọc ghế (mySeat) từ state điều hướng, mặc định 0 nếu mở trực tiếp
+  // Đọc ghế (mySeat) và mã phòng từ state điều hướng
   const mySeat = (location.state as { mySeat?: number })?.mySeat ?? 0;
   const roomCode = (location.state as { roomCode?: string })?.roomCode;
 
+  // Nếu là Game cờ Caro -> Render màn hình ván đấu online thật (P3.3c)
+  if (gameId === 'caro') {
+    return <OnlineMatchScreen matchId={matchId} mySeat={mySeat} roomCode={roomCode} />;
+  }
+
+  // Placeholder cho các game khác
   return (
     <div
       data-testid="online-game-placeholder"
@@ -41,7 +48,6 @@ export const OnlineGamePage: React.FC = () => {
           </p>
         </div>
 
-        {/* Bảng thông tin trận đấu placeholder */}
         <div className="p-4 rounded-2xl bg-white dark:bg-slate-950/90 border border-slate-200 dark:border-slate-800 space-y-3 text-left">
           <div>
             <span className="text-[10px] font-bold uppercase text-slate-400">Trò chơi:</span>
@@ -85,18 +91,6 @@ export const OnlineGamePage: React.FC = () => {
               {mySeat === 0 ? 'Ghế 0 (Quân X — Đi trước)' : 'Ghế 1 (Quân O — Đi sau)'}
             </div>
           </div>
-        </div>
-
-        {/* Ghi chú lộ trình P3.3c */}
-        <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs text-left space-y-1">
-          <div className="font-bold flex items-center gap-1.5">
-            <span>🚧</span>
-            <span>Màn hình chuyển tiếp (Phase P3.3b)</span>
-          </div>
-          <p className="opacity-90 leading-relaxed">
-            Hạ tầng tạo phòng, vào phòng, chia ghế 50/50 và deep link đã hoàn tất. Phase P3.3c sẽ
-            gắn Trọng tài Server-side (referee) và bàn cờ trực tiếp vào màn hình này!
-          </p>
         </div>
 
         <button

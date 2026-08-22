@@ -263,4 +263,52 @@ describe('Match Repository Unit Tests (matchRepository.ts - P2.5a)', () => {
       });
     });
   });
+
+  describe('getLiveState', () => {
+    it('10. Đọc thành công live state từ bảng match_live_state', async () => {
+      const mockSelect = vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: {
+              state_serialized: 'state_123',
+              move_index: 5,
+              current_seat: 1,
+              moves_serialized: '0,1,2,3,4',
+            },
+            error: null,
+          }),
+        }),
+      });
+
+      vi.spyOn(supabase, 'from').mockReturnValue({
+        select: mockSelect,
+      } as unknown as ReturnType<typeof supabase.from>);
+
+      const result = await matchRepo.getLiveState('match-123');
+      expect(result).toEqual({
+        stateSerialized: 'state_123',
+        moveIndex: 5,
+        currentSeat: 1,
+        movesSerialized: '0,1,2,3,4',
+      });
+    });
+
+    it('11. Trả về null khi không tìm thấy live state (đã kết thúc)', async () => {
+      const mockSelect = vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: null,
+            error: null,
+          }),
+        }),
+      });
+
+      vi.spyOn(supabase, 'from').mockReturnValue({
+        select: mockSelect,
+      } as unknown as ReturnType<typeof supabase.from>);
+
+      const result = await matchRepo.getLiveState('match-ended');
+      expect(result).toBeNull();
+    });
+  });
 });
