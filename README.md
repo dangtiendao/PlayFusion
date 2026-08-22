@@ -153,3 +153,53 @@ chmod +x scripts/decrypt-backup.sh
 # Kiểm tra cấu trúc bản dump đã giải mã:
 pg_restore --list webgamehub-prod-20260819-2000.dump
 ```
+
+---
+
+## Supabase Edge Functions & Trọng Tài Server-side (P3.2)
+
+Hệ thống sử dụng **Supabase Edge Functions** chạy trên runtime **Deno** để làm Trọng tài Server-side (Arbitrator), xác thực tính hợp lệ của nước đi cờ và bảo đảm an ninh phòng đấu.
+
+### 1. Cấu trúc thư mục
+
+```
+supabase/functions/
+├── deno.json                   # Cấu hình Deno runtime & import maps
+├── _shared/                    # Module dùng chung giữa các functions
+│   ├── cors.ts                 # Headers CORS cho Web Client
+│   ├── response.ts             # Helper trả về chuẩn JSON { ok, data | error }
+│   └── supabaseAdmin.ts        # Supabase Client Admin & User Auth helper
+├── hello-referee/              # Function mẫu kiểm chứng JWT & Engine
+│   └── index.ts
+└── tests/                      # Suite kiểm thử Deno thuần
+    └── engine-in-deno.test.ts
+```
+
+### 2. Quy ước Response JSON Chuẩn
+
+Mọi Edge Functions đều tuân thủ cấu trúc phản hồi nhất quán:
+
+- **Thành công**: `{ "ok": true, "data": { ... } }` (HTTP 200)
+- **Thất bại**: `{ "ok": false, "error": { "code": "ERROR_CODE", "message": "Mô tả lỗi" } }` (HTTP 400/401/403/500)
+
+### 3. Lệnh vận hành Supabase CLI
+
+```bash
+# 1. Đăng nhập Supabase CLI (nhập Access Token)
+npx supabase login
+
+# 2. Liên kết với Project DEV (mặc định cho phát triển)
+npx supabase link --project-ref <DEV_PROJECT_REF>
+
+# 3. Chạy Edge Function cục bộ (Local Serve)
+npx supabase functions serve hello-referee --env-file .env.local
+
+# 4. Chạy kiểm thử Game Engine trong môi trường Deno
+npm run test:deno
+
+# 5. Deploy lên môi trường DEV
+npx supabase functions deploy hello-referee
+
+# 6. Deploy lên môi trường PROD (BẮT BUỘC truyền cờ tường minh --project-ref)
+npx supabase functions deploy hello-referee --project-ref <PROD_PROJECT_REF>
+```
