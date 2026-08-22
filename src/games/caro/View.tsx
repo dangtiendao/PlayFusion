@@ -20,6 +20,7 @@
  */
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { GameViewProps } from '../types';
 import type { MatchResultReport, MatchResultParticipant } from '@engines/types';
 import {
@@ -29,7 +30,14 @@ import {
   checkWinAt,
   type CaroState,
 } from '@engines/caro';
-import { InteractiveBoard, ModeSelect, MatchEndOverlay, type SessionScore } from './components';
+import {
+  InteractiveBoard,
+  ModeSelect,
+  MatchEndOverlay,
+  OnlineLobby,
+  OnlineWaiting,
+  type SessionScore,
+} from './components';
 import type { CaroMatchConfig, CaroScreen, CaroSavedSessionExtra } from './types';
 import { getAiLevelLabel } from '../labels';
 import { useCaroAi } from './useCaroAi';
@@ -55,8 +63,13 @@ export const CaroGameView: React.FC<GameViewProps> = ({
   onGameEnd,
   shellApi,
 }) => {
-  // 1. Quản lý trạng thái màn hình (State Machine: 'setup' | 'playing' | 'finished')
+  const navigate = useNavigate();
+
+  // 1. Quản lý trạng thái màn hình (State Machine: 'setup' | 'playing' | 'finished' | 'online_lobby' | 'online_waiting')
   const [screen, setScreen] = useState<CaroScreen>('setup');
+
+  // Phòng đấu vừa tạo (nếu đang ở màn hình chờ online_waiting)
+  const [createdRoom, setCreatedRoom] = useState<{ code: string; expiresAt: string } | null>(null);
 
   // 2. Cấu hình trận đấu được chọn từ màn hình setup
   const [matchConfig, setMatchConfig] = useState<CaroMatchConfig | null>(null);
@@ -362,8 +375,14 @@ export const CaroGameView: React.FC<GameViewProps> = ({
   // CÁC HÀM CHUYỂN TRẠNG THÁI (STATE MACHINE TRANSITIONS & RECOVERY PIPELINE)
   // ============================================================================
 
-  // Bắt đầu ván đấu mới từ ModeSelect (setup -> playing)
+  // Bắt đầu ván đấu mới từ ModeSelect (setup -> playing hoặc setup -> online_lobby)
   const handleStartMatch = useCallback((config: CaroMatchConfig) => {
+    // Nếu chọn chế độ Online 1v1 -> chuyển sang Sảnh phòng đấu (P3.3b)
+    if (config.mode === 'online_1v1') {
+      setScreen('online_lobby');
+      return;
+    }
+
     // Xóa ván dở cũ (nếu có) khi người chơi chủ động bắt đầu ván mới
     clearSavedMatch('caro');
     setSavedMatchState(null);
@@ -710,6 +729,53 @@ export const CaroGameView: React.FC<GameViewProps> = ({
           stats={accumulatedStats}
           history={history}
           onStart={handleStartMatch}
+          shellApi={shellApi}
+        />
+      </div>
+    );
+  }
+
+  // ============================================================================
+  // RENDER MÀN HÌNH SẢNH ONLINE (P3.3b): TẠO PHÒNG / NHẬP MÃ 6 KÝ TỰ
+  // ============================================================================
+  if (screen === 'online_lobby') {
+    return (
+      <div data-testid="caro-online-lobby-screen" className="w-full flex flex-col items-center">
+        <OnlineLobby
+          onBack={() => setScreen('setup')}
+          onRoomCreated={(code, expiresAt) => {
+            setCreatedRoom({ code, expiresAt });
+            setScreen('online_waiting');
+          }}
+          onRoomJoined={(matchId, mySeat, gameId, code) => {
+            navigate(`/game/caro/online/${matchId}`, {
+              state: { mySeat, roomCode: code, gameId },
+            });
+          }}
+          shellApi={shellApi}
+        />
+      </div>
+    );
+  }
+
+  // ============================================================================
+  // RENDER MÀN HÌNH CHỜ ĐỐI THỦ (P3.3b): MÃ PHÒNG TO, SHARE LINK, PRESENCE
+  // ============================================================================
+  if (screen === 'online_waiting' && createdRoom) {
+    return (
+      <div data-testid="caro-online-waiting-screen" className="w-full flex flex-col items-center">
+        <OnlineWaiting
+          code={createdRoom.code}
+          expiresAt={createdRoom.expiresAt}
+          onMatchFound={(matchId, mySeat) => {
+            navigate(`/game/caro/online/${matchId}`, {
+              state: { mySeat, roomCode: createdRoom.code, gameId: 'caro' },
+            });
+          }}
+          onCancel={() => {
+            setCreatedRoom(null);
+            setScreen('online_lobby');
+          }}
           shellApi={shellApi}
         />
       </div>

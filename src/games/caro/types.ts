@@ -40,8 +40,8 @@ export interface CaroAiWorkerApi {
  * Cấu hình tham số khởi tạo trận đấu Caro.
  */
 export interface CaroMatchConfig {
-  /** Chế độ chơi: Đấu máy ('vs_ai') hoặc 2 người trên cùng máy ('local_pvp') */
-  readonly mode: 'vs_ai' | 'local_pvp';
+  /** Chế độ chơi: Đấu máy ('vs_ai'), 2 người trên cùng máy ('local_pvp'), hoặc Đấu trực tuyến ('online_1v1') */
+  readonly mode: 'vs_ai' | 'local_pvp' | 'online_1v1';
   /** Cấp độ khó của AI (bắt buộc khi mode = 'vs_ai') */
   readonly aiLevel?: AiLevel;
   /**
@@ -72,5 +72,7 @@ export interface CaroSavedSessionExtra {
  * - 'setup': Màn hình cấu hình và lựa chọn chế độ chơi (`ModeSelect.tsx`).
  * - 'playing': Màn hình bàn cờ đang diễn ra trận đấu (`InteractiveBoard.tsx`).
  * - 'finished': Màn hình kết thúc trận đấu và điều hướng tiếp theo.
+ * - 'online_lobby': Màn hình sảnh phòng đấu (Tạo phòng / Nhập mã 6 ký tự - P3.3b).
+ * - 'online_waiting': Màn hình chờ đối thủ tham gia phòng (Mã phòng, Share link, Presence - P3.3b).
  */
-export type CaroScreen = 'setup' | 'playing' | 'finished';
+export type CaroScreen = 'setup' | 'playing' | 'finished' | 'online_lobby' | 'online_waiting';

@@ -36,6 +36,10 @@ const ProfilePage = lazy(() => import('@/pages/ProfilePage'));
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'));
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
 
+// Deep link và Trận đấu Online (Phase P3.3b)
+const RoomJoinPage = lazy(() => import('@/pages/RoomJoinPage'));
+const OnlineGamePage = lazy(() => import('@/pages/OnlineGamePage'));
+
 // DEMO P3.1c — Sẽ GỠ BỎ ở Phase P3.3 khi hoàn thành màn hình phòng đấu thật
 const TransportDemoPage = lazy(() => import('@/pages/dev/TransportDemo'));
 
@@ -60,6 +64,26 @@ export const APP_ROUTES: readonly RouteConfig[] = [
     element: (
       <Suspense fallback={<LoadingSpinner message="Đang tải trò chơi..." />}>
         <GamePage />
+      </Suspense>
+    ),
+    showInNav: false,
+  },
+  {
+    path: '/game/:gameId/online/:matchId',
+    label: 'Trận đấu trực tuyến',
+    element: (
+      <Suspense fallback={<LoadingSpinner message="Đang kết nối trận đấu..." />}>
+        <OnlineGamePage />
+      </Suspense>
+    ),
+    showInNav: false,
+  },
+  {
+    path: '/room/:code',
+    label: 'Vào phòng đấu',
+    element: (
+      <Suspense fallback={<LoadingSpinner message="Đang kiểm tra phòng đấu..." />}>
+        <RoomJoinPage />
       </Suspense>
     ),
     showInNav: false,

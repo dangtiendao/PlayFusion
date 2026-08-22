@@ -10,6 +10,15 @@ import * as useCaroAiModule from './useCaroAi';
 import * as gameLocalDataModule from '../../core/gameLocalData';
 import * as syncBootstrapModule from '../../core/syncBootstrap';
 
+const mockNavigate = vi.fn();
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual('react-router-dom');
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
+
 /**
  * Mock hook useCaroAi để kiểm soát hành vi bất đồng bộ và kiểm tra 4 ca vòng đời
  */
@@ -335,5 +344,19 @@ describe('Caro Game View Component, Local Data & Auto-Save Recovery Tests (View.
         ]),
       }),
     );
+  });
+
+  it('9. Chọn chế độ online_1v1 -> chuyển sang màn hình Sảnh Đấu Trực Tuyến (P3.3b)', () => {
+    render(
+      <CaroGameView definition={caroManifest} onGameEnd={mockOnGameEnd} shellApi={mockShellApi} />,
+    );
+
+    const onlineBtn = screen.getByTestId('mode-btn-online_1v1');
+    act(() => {
+      fireEvent.click(onlineBtn);
+    });
+
+    expect(screen.getByTestId('caro-online-lobby-screen')).not.toBeNull();
+    expect(screen.getByTestId('online-lobby')).not.toBeNull();
   });
 });
