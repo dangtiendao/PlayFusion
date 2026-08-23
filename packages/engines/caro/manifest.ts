@@ -26,6 +26,7 @@ export const caroManifest: GameDefinition = {
     'vs_ai', // Đấu với máy (AI Minimax Alpha-Beta Worker P1.2)
     'local_pvp', // Đấu 2 người trên cùng máy (Local Pass & Play P1.3)
     'online_1v1', // Đấu 1v1 trực tuyến qua phòng mã 6 ký tự (P3.3: online mở)
+    'online_correspondence', // Đấu theo lượt kiểu thư tín qua phòng mã (P3.6)
   ],
   turnBased: true,
   ranked: true,

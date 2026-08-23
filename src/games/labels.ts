@@ -71,6 +71,7 @@ export const MODE_LABELS: Record<GameMode, string> = {
   vs_ai: 'Đấu máy',
   local_pvp: '2 người 1 máy',
   online_1v1: 'Đấu 1v1 Online',
+  online_correspondence: 'Chơi theo lượt',
   online_ffa: 'Đấu tự do',
   online_team: 'Đấu đội',
 };
@@ -83,6 +84,7 @@ export const MODE_DESCRIPTIONS: Record<GameMode, string> = {
   vs_ai: 'Thử thách trí tuệ với bot AI 3 cấp độ thông minh',
   local_pvp: 'Chơi đối kháng 2 người trực tiếp trên cùng một màn hình',
   online_1v1: 'Ghép trận đối kháng trực tuyến 1 vs 1 tính điểm xếp hạng Elo',
+  online_correspondence: 'Đi nước rồi quay lại sau — mỗi nước có N giờ',
   online_ffa: 'Tranh tài tự do nhiều người chơi trực tuyến',
   online_team: 'Hợp tác đồng đội đối đầu theo nhóm',
 };
