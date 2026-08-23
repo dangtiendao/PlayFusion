@@ -35,6 +35,12 @@ export const caroManifest: GameDefinition = {
   avgMatchSeconds: 300,
   aiLevels: ['easy', 'medium', 'hard'],
   themeColor: '#06b6d4',
+  // Cấu hình đồng hồ kiểm soát thời gian (P3.4a): 5 phút cơ bản + 5s cộng thêm mỗi nước
+  // GHI CHÚ: Giá trị THẬT của ván đấu do server đọc system_config lúc init, manifest chỉ để UI mô tả chế độ.
+  timeControl: {
+    baseSeconds: 300,
+    incrementSeconds: 5,
+  },
   loadEngine: async () => {
     const { caroEngine } = await import('./engine');
     return caroEngine;

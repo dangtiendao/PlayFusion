@@ -5,20 +5,25 @@
  *
  * GHI CHÚ KIẾN TRÚC & SECURITY:
  * 1. TÁCH BIỆT LOGIC (CORE PATTERN):
- *    - Toàn bộ logic thẩm định nước đi, kiểm tra quyền, khóa lạc quan và tính thắng thua
- *      được viết thuần túy (Pure Logic) nhận Dependencies Inject.
- *    - Cho phép kiểm thử 100% các nhánh logic trong Deno test mà không cần DB thật.
- * 2. CHUỖI VALIDATE CHUẨN HÓA (a -> f):
+ *    - Toàn bộ logic thẩm định nước đi, kiểm tra quyền, tính giờ server-side,
+ *      khóa lạc quan và xử lý đầu hàng/quá giờ được viết thuần túy (Pure Logic).
+ *    - Nhận Dependencies Inject (kể cả hàm `now()`), kiểm thử 100% không cần DB thật.
+ * 2. CHUỖI VALIDATE CHUẨN HÓA CỦA ACTION 'move':
  *    - a. Tồn tại trận đấu & Người gọi là đấu thủ hợp lệ (404 / 403).
  *    - b. Trận đấu chưa kết thúc (409).
  *    - c. Khóa lũy công / Idempotency & Phát hiện lệch nhịp (200 duplicate / 409 stale).
  *    - d. Kiểm tra đúng lượt rẻ tiền từ DB trước khi gọi Engine (403).
+ *    - [MỚI - P3.4b] TÍNH GIỜ SERVER-SIDE:
+ *      + Phép tính rẻ tiền (now - turn_started_at) thực hiện ngay sau [d] và trước [e].
+ *      + Nếu hết giờ (remaining <= 0): Phát phán quyết TIMEOUT/ABORT, không tốn CPU chạy Engine.
  *    - e. Giải mã cú pháp nước đi và bàn cờ (400).
  *    - f. Thẩm định nước đi bằng Game Engine TS thuần túy (422 / 403 / 409 / 500).
- * 3. KHÓA LẠC QUAN (OPTIMISTIC LOCKING):
- *    - Cập nhật DB kèm điều kiện `move_index = expectedMoveIndex`.
- *    - Nếu `affectedRows === 0` (thua đua request song song): trả về 409 STALE_CLIENT
- *      và KHÔNG phát sóng broadcast.
+ * 3. QUY TẮC BẤT BIẾN ĐỒNG HỒ & BỎ TRẬN:
+ *    - GRACE PERIOD (2 Giây): Khi `claim_timeout`, server chỉ chấp nhận khi now > deadline + 2000ms.
+ *    - INCREMENT: `incrementSeconds` CHỈ được cộng vào quỹ giờ khi nước đi hợp lệ.
+ *    - LUẬT NGƯỠNG ABORT (Mặc định 3 nước):
+ *      + `move_index < threshold`: Kết thúc với `end_reason = 'abort'` (kết quả hủy/hòa).
+ *      + `move_index >= threshold`: Kết thúc với `end_reason = 'resign'` hoặc `'timeout'`.
  * ==============================================================================
  */
 
@@ -33,6 +38,7 @@ export interface MatchRecord {
   readonly ended_at: string | null;
   readonly started_at: string;
   readonly options?: Record<string, unknown> | null;
+  readonly time_control?: { baseSeconds: number; incrementSeconds?: number } | null;
 }
 
 export interface ParticipantRecord {
@@ -48,11 +54,15 @@ export interface LiveStateRecord {
   readonly move_index: number;
   readonly current_seat: number;
   readonly moves_serialized: string;
+  readonly clock?: Record<string, number> | null;
+  readonly turn_started_at?: string | null;
   readonly turn_deadline: string | null;
-  readonly updated_at: string;
+  readonly updated_at?: string;
 }
 
 export interface RefereeDependencies {
+  readonly now?: () => number;
+  readonly loadSystemConfig?: (key: string) => Promise<Record<string, unknown> | null>;
   readonly loadMatchAndParticipants: (
     matchId: string,
   ) => Promise<{ match: MatchRecord | null; participants: ParticipantRecord[] }>;
@@ -63,6 +73,9 @@ export interface RefereeDependencies {
     move_index: number;
     current_seat: number;
     moves_serialized: string;
+    clock?: Record<string, number> | null;
+    turn_started_at?: string | null;
+    turn_deadline?: string | null;
   }) => Promise<void>;
   readonly updateLiveStateOptimistic: (record: {
     match_id: string;
@@ -71,6 +84,9 @@ export interface RefereeDependencies {
     current_seat: number;
     moves_serialized: string;
     expected_move_index: number;
+    clock?: Record<string, number> | null;
+    turn_started_at?: string | null;
+    turn_deadline?: string | null;
   }) => Promise<boolean>;
   readonly finalizeMatch: (
     matchId: string,
@@ -81,7 +97,7 @@ export interface RefereeDependencies {
       moves: string;
       end_reason: string;
     },
-    participantsResult: { user_id: string; is_winner: boolean }[],
+    participantsResult: { user_id: string; is_winner: boolean | null }[],
   ) => Promise<void>;
   readonly deleteLiveState: (matchId: string) => Promise<void>;
   readonly broadcast: (matchId: string, eventType: string, payload: unknown) => Promise<void>;
@@ -101,15 +117,19 @@ export interface CoreResult<T> {
   readonly body: ApiResponseSuccess<T> | ApiResponseError;
 }
 
+/** Hằng số Grace Period (ms) cho claim_timeout để bù trừ độ trễ mạng */
+export const CLAIM_TIMEOUT_GRACE_MS = 2000;
+
 /**
- * Xử lý Action 'init': Khởi tạo thế cờ ban đầu cho ván đấu online.
+ * Xử lý Action 'init': Khởi tạo thế cờ ban đầu và quỹ giờ cho ván đấu online.
  */
 export async function handleInitAction(
   userId: string,
   matchId: string,
   deps: RefereeDependencies,
 ): Promise<CoreResult<unknown>> {
-  const startTime = Date.now();
+  const getNow = deps.now || Date.now;
+  const startTime = getNow();
 
   try {
     if (!matchId) {
@@ -119,7 +139,7 @@ export async function handleInitAction(
         matchId: '',
         userId,
         outcome: 'MISSING_MATCH_ID',
-        ms: Date.now() - startTime,
+        ms: getNow() - startTime,
       });
       return {
         status: 400,
@@ -136,7 +156,7 @@ export async function handleInitAction(
         matchId,
         userId,
         outcome: 'MATCH_NOT_FOUND',
-        ms: Date.now() - startTime,
+        ms: getNow() - startTime,
       });
       return {
         status: 404,
@@ -153,7 +173,7 @@ export async function handleInitAction(
         matchId,
         userId,
         outcome: 'NOT_PARTICIPANT',
-        ms: Date.now() - startTime,
+        ms: getNow() - startTime,
       });
       return {
         status: 403,
@@ -171,13 +191,15 @@ export async function handleInitAction(
         matchId,
         userId,
         outcome: 'MATCH_ENDED',
-        ms: Date.now() - startTime,
+        ms: getNow() - startTime,
       });
       return {
         status: 409,
         body: { ok: false, error: { code: 'MATCH_ENDED', message: 'Ván đấu đã kết thúc.' } },
       };
     }
+
+    const nowIso = new Date(getNow()).toISOString();
 
     // 3. Kiểm tra live_state đã tồn tại chưa (Idempotent: người thứ 2 vào phòng gọi init trùng -> trả state cũ)
     const existingLiveState = await deps.loadLiveState(matchId);
@@ -188,7 +210,7 @@ export async function handleInitAction(
         matchId,
         userId,
         outcome: 'already_initialized',
-        ms: Date.now() - startTime,
+        ms: getNow() - startTime,
       });
       return {
         status: 200,
@@ -199,6 +221,9 @@ export async function handleInitAction(
             moveIndex: existingLiveState.move_index,
             currentSeat: existingLiveState.current_seat,
             movesSerialized: existingLiveState.moves_serialized,
+            clock: existingLiveState.clock || null,
+            turnDeadline: existingLiveState.turn_deadline || null,
+            serverNow: nowIso,
           },
         },
       };
@@ -213,7 +238,7 @@ export async function handleInitAction(
         matchId,
         userId,
         outcome: 'UNSUPPORTED_GAME',
-        ms: Date.now() - startTime,
+        ms: getNow() - startTime,
       });
       return {
         status: 400,
@@ -230,28 +255,63 @@ export async function handleInitAction(
     // 5. Khởi tạo trạng thái bàn cờ ban đầu qua TS Game Engine thuần
     const options = match.options || engineModule.defaultOptions || {};
     const initialState = engineModule.engine.init({
-      playerCount: 2,
+      playerCount: participants.length || 2,
       options,
     });
 
     const stateSerialized = engineModule.engine.serialize(initialState);
     const currentSeat = engineModule.engine.currentPlayer(initialState);
 
-    // 6. Ghi bản ghi vào match_live_state
+    // 6. Đọc cấu hình Time Control từ system_config hoặc default
+    let timeControl = match.time_control;
+    if (!timeControl && deps.loadSystemConfig) {
+      const configVal = await deps.loadSystemConfig('match.default_time_control');
+      if (configVal && typeof configVal.baseSeconds === 'number') {
+        timeControl = {
+          baseSeconds: Number(configVal.baseSeconds),
+          incrementSeconds: Number(configVal.incrementSeconds || 0),
+        };
+      }
+    }
+    const baseSeconds = timeControl?.baseSeconds ?? 300;
+    const baseMs = baseSeconds * 1000;
+
+    // Khởi tạo quỹ giờ theo seat_index
+    const initialClock: Record<string, number> = {};
+    for (const p of participants) {
+      initialClock[String(p.seat_index)] = baseMs;
+    }
+    // Nếu chưa có participants, mặc định 2 seat
+    if (participants.length === 0) {
+      initialClock['0'] = baseMs;
+      initialClock['1'] = baseMs;
+    }
+
+    const turnStartedAtIso = nowIso;
+    const currentSeatBaseMs = initialClock[String(currentSeat)] ?? baseMs;
+    const turnDeadlineIso = new Date(getNow() + currentSeatBaseMs).toISOString();
+
+    // 7. Ghi bản ghi vào match_live_state
     await deps.insertLiveState({
       match_id: matchId,
       state_serialized: stateSerialized,
       move_index: 0,
       current_seat: currentSeat,
       moves_serialized: '',
+      clock: initialClock,
+      turn_started_at: turnStartedAtIso,
+      turn_deadline: turnDeadlineIso,
     });
 
-    // 7. Phát sóng thông điệp match_ready qua Realtime Broadcast
+    // 8. Phát sóng thông điệp match_ready qua Realtime Broadcast
     await deps.broadcast(matchId, 'match_ready', {
       matchId,
       moveIndex: 0,
       currentSeat,
       stateSerialized,
+      clock: initialClock,
+      turnDeadline: turnDeadlineIso,
+      serverNow: nowIso,
     });
 
     deps.log({
@@ -260,7 +320,7 @@ export async function handleInitAction(
       matchId,
       userId,
       outcome: 'created',
-      ms: Date.now() - startTime,
+      ms: getNow() - startTime,
     });
 
     return {
@@ -272,6 +332,9 @@ export async function handleInitAction(
           moveIndex: 0,
           currentSeat,
           movesSerialized: '',
+          clock: initialClock,
+          turnDeadline: turnDeadlineIso,
+          serverNow: nowIso,
         },
       },
     };
@@ -282,7 +345,7 @@ export async function handleInitAction(
       matchId,
       userId,
       outcome: 'INTERNAL_ERROR',
-      ms: Date.now() - startTime,
+      ms: getNow() - startTime,
     });
     return {
       status: 500,
@@ -298,14 +361,15 @@ export async function handleInitAction(
 }
 
 /**
- * Xử lý Action 'move': Thẩm định và áp dụng nước đi trực tuyến.
+ * Xử lý Action 'move': Thẩm định, tính giờ và áp dụng nước đi trực tuyến.
  */
 export async function handleMoveAction(
   userId: string,
   payload: { matchId: string; moveSerialized: string; expectedMoveIndex: number },
   deps: RefereeDependencies,
 ): Promise<CoreResult<unknown>> {
-  const startTime = Date.now();
+  const getNow = deps.now || Date.now;
+  const startTime = getNow();
   const { matchId, moveSerialized, expectedMoveIndex } = payload;
 
   try {
@@ -318,7 +382,7 @@ export async function handleMoveAction(
         userId,
         moveIndex: expectedMoveIndex,
         outcome: 'BAD_REQUEST',
-        ms: Date.now() - startTime,
+        ms: getNow() - startTime,
       });
       return {
         status: 400,
@@ -349,7 +413,7 @@ export async function handleMoveAction(
         userId,
         moveIndex: expectedMoveIndex,
         outcome: 'MATCH_NOT_FOUND',
-        ms: Date.now() - startTime,
+        ms: getNow() - startTime,
       });
       return {
         status: 404,
@@ -373,7 +437,7 @@ export async function handleMoveAction(
         userId,
         moveIndex: expectedMoveIndex,
         outcome: 'NOT_PARTICIPANT',
-        ms: Date.now() - startTime,
+        ms: getNow() - startTime,
       });
       return {
         status: 403,
@@ -393,7 +457,7 @@ export async function handleMoveAction(
         userId,
         moveIndex: expectedMoveIndex,
         outcome: 'MATCH_ENDED',
-        ms: Date.now() - startTime,
+        ms: getNow() - startTime,
       });
       return {
         status: 409,
@@ -401,9 +465,11 @@ export async function handleMoveAction(
       };
     }
 
+    const nowMs = getNow();
+    const nowIso = new Date(nowMs).toISOString();
+
     // [c] Kiểm tra Idempotency và Lệch nhịp (expectedMoveIndex vs liveState.move_index)
     if (expectedMoveIndex < liveState.move_index) {
-      // Client gửi lại nước cũ (mạng lag retry) -> Trả về 200 kèm state hiện tại, KHÔNG áp dụng lại
       deps.log({
         fn: 'referee',
         action: 'move',
@@ -411,7 +477,7 @@ export async function handleMoveAction(
         userId,
         moveIndex: expectedMoveIndex,
         outcome: 'duplicate_accepted',
-        ms: Date.now() - startTime,
+        ms: getNow() - startTime,
       });
       return {
         status: 200,
@@ -422,13 +488,15 @@ export async function handleMoveAction(
             stateSerialized: liveState.state_serialized,
             moveIndex: liveState.move_index,
             currentSeat: liveState.current_seat,
+            clock: liveState.clock || null,
+            turnDeadline: liveState.turn_deadline || null,
+            serverNow: nowIso,
           },
         },
       };
     }
 
     if (expectedMoveIndex > liveState.move_index) {
-      // Client bị nhảy cóc / mất gói tin trước đó -> Trả 409 để client tự đồng bộ lại
       deps.log({
         fn: 'referee',
         action: 'move',
@@ -436,7 +504,7 @@ export async function handleMoveAction(
         userId,
         moveIndex: expectedMoveIndex,
         outcome: 'STALE_CLIENT',
-        ms: Date.now() - startTime,
+        ms: getNow() - startTime,
       });
       return {
         status: 409,
@@ -459,11 +527,94 @@ export async function handleMoveAction(
         userId,
         moveIndex: expectedMoveIndex,
         outcome: 'WRONG_TURN',
-        ms: Date.now() - startTime,
+        ms: getNow() - startTime,
       });
       return {
         status: 403,
         body: { ok: false, error: { code: 'WRONG_TURN', message: 'Chưa đến lượt đi của bạn.' } },
+      };
+    }
+
+    // ==============================================================================
+    // [BƯỚC MỚI: TÍNH GIỜ SERVER-SIDE]
+    // ==============================================================================
+    const seatKey = String(callerParticipant.seat_index);
+    const turnStartedMs = liveState.turn_started_at
+      ? new Date(liveState.turn_started_at).getTime()
+      : nowMs;
+    const elapsedMs = Math.max(0, nowMs - turnStartedMs);
+    const currentSeatClockMs = liveState.clock?.[seatKey] ?? 300000;
+    const remainingMs = currentSeatClockMs - elapsedMs;
+
+    if (remainingMs <= 0) {
+      // NGƯỜI GỬI ĐÃ HẾT GIỜ KHI CỐ GỬI NƯỚC ĐI MUỘN
+      let threshold = 3;
+      if (deps.loadSystemConfig) {
+        const thresholdCfg = await deps.loadSystemConfig('match.abort_move_threshold');
+        if (thresholdCfg && typeof thresholdCfg.moves === 'number') {
+          threshold = Number(thresholdCfg.moves);
+        }
+      }
+
+      const startedAtMs = new Date(match.started_at).getTime();
+      const durationMs = Math.max(0, nowMs - startedAtMs);
+      const isAbort = liveState.move_index < threshold;
+      const endReason = isAbort ? 'abort' : 'timeout';
+
+      const participantsResult = participants.map((p) => ({
+        user_id: p.user_id,
+        is_winner: isAbort ? null : p.seat_index !== callerParticipant.seat_index,
+      }));
+
+      await deps.finalizeMatch(
+        matchId,
+        {
+          ended_at: nowIso,
+          duration_ms: durationMs,
+          final_state: liveState.state_serialized,
+          moves: liveState.moves_serialized,
+          end_reason: endReason,
+        },
+        participantsResult,
+      );
+
+      await deps.deleteLiveState(matchId);
+
+      const outcomes = isAbort
+        ? null
+        : participants.map((p) => ({
+            playerIndex: p.seat_index,
+            outcome: (p.seat_index === callerParticipant.seat_index ? 'loss' : 'win') as
+              | 'win'
+              | 'loss',
+          }));
+
+      await deps.broadcast(matchId, 'match_ended', {
+        matchId,
+        reason: endReason,
+        outcomes,
+        serverNow: nowIso,
+      });
+
+      deps.log({
+        fn: 'referee',
+        action: 'move',
+        matchId,
+        userId,
+        moveIndex: expectedMoveIndex,
+        outcome: 'TIME_OUT',
+        ms: getNow() - startTime,
+      });
+
+      return {
+        status: 409,
+        body: {
+          ok: false,
+          error: {
+            code: 'TIME_OUT',
+            message: 'Thời gian dành cho nước đi của bạn đã kết thúc.',
+          },
+        },
       };
     }
 
@@ -477,7 +628,7 @@ export async function handleMoveAction(
         userId,
         moveIndex: expectedMoveIndex,
         outcome: 'UNSUPPORTED_GAME',
-        ms: Date.now() - startTime,
+        ms: getNow() - startTime,
       });
       return {
         status: 400,
@@ -502,7 +653,7 @@ export async function handleMoveAction(
         userId,
         moveIndex: expectedMoveIndex,
         outcome: 'INVALID_STATE',
-        ms: Date.now() - startTime,
+        ms: getNow() - startTime,
       });
       return {
         status: 400,
@@ -527,7 +678,7 @@ export async function handleMoveAction(
         userId,
         moveIndex: expectedMoveIndex,
         outcome: 'BAD_MOVE',
-        ms: Date.now() - startTime,
+        ms: getNow() - startTime,
       });
       return {
         status: 400,
@@ -559,7 +710,7 @@ export async function handleMoveAction(
             userId,
             moveIndex: expectedMoveIndex,
             outcome: 'ILLEGAL_MOVE',
-            ms: Date.now() - startTime,
+            ms: getNow() - startTime,
           });
           return {
             status: 422,
@@ -574,7 +725,7 @@ export async function handleMoveAction(
             userId,
             moveIndex: expectedMoveIndex,
             outcome: 'WRONG_TURN',
-            ms: Date.now() - startTime,
+            ms: getNow() - startTime,
           });
           return {
             status: 403,
@@ -589,7 +740,7 @@ export async function handleMoveAction(
             userId,
             moveIndex: expectedMoveIndex,
             outcome: 'MATCH_ENDED',
-            ms: Date.now() - startTime,
+            ms: getNow() - startTime,
           });
           return {
             status: 409,
@@ -605,7 +756,7 @@ export async function handleMoveAction(
         userId,
         moveIndex: expectedMoveIndex,
         outcome: 'ENGINE_ERROR',
-        ms: Date.now() - startTime,
+        ms: getNow() - startTime,
       });
       return {
         status: 500,
@@ -620,8 +771,15 @@ export async function handleMoveAction(
     }
 
     // ==============================================================================
-    // GHI DATABASE VỚI KHÓA LẠC QUAN (OPTIMISTIC LOCKING)
+    // TÍNH ĐỒNG HỒ MỚI (INCREMENT CHỈ CỘNG KHI NƯỚC ĐI HỢP LỆ)
     // ==============================================================================
+    const incrementSeconds = match.time_control?.incrementSeconds ?? 5;
+    const newSeatClockMs = remainingMs + incrementSeconds * 1000;
+    const nextClock: Record<string, number> = {
+      ...(liveState.clock || {}),
+      [seatKey]: newSeatClockMs,
+    };
+
     const nextStateSerialized = engineModule.engine.serialize(nextState);
     const nextMoveIndex = expectedMoveIndex + 1;
     const nextSeat = engineModule.engine.currentPlayer(nextState);
@@ -629,6 +787,13 @@ export async function handleMoveAction(
       ? `${liveState.moves_serialized},${moveSerialized}`
       : moveSerialized;
 
+    const nextTurnStartedAt = nowIso;
+    const nextSeatRemainingMs = nextClock[String(nextSeat)] ?? 300000;
+    const nextTurnDeadline = new Date(nowMs + nextSeatRemainingMs).toISOString();
+
+    // ==============================================================================
+    // GHI DATABASE VỚI KHÓA LẠC QUAN (OPTIMISTIC LOCKING)
+    // ==============================================================================
     const isLockAcquired = await deps.updateLiveStateOptimistic({
       match_id: matchId,
       state_serialized: nextStateSerialized,
@@ -636,10 +801,12 @@ export async function handleMoveAction(
       current_seat: nextSeat,
       moves_serialized: nextMovesSerialized,
       expected_move_index: expectedMoveIndex,
+      clock: nextClock,
+      turn_started_at: nextTurnStartedAt,
+      turn_deadline: nextTurnDeadline,
     });
 
     if (!isLockAcquired) {
-      // Thua đua request song song -> Đọc lại state mới nhất và trả 409 STALE_CLIENT (KHÔNG broadcast)
       deps.log({
         fn: 'referee',
         action: 'move',
@@ -647,7 +814,7 @@ export async function handleMoveAction(
         userId,
         moveIndex: expectedMoveIndex,
         outcome: 'RACE_LOST_STALE_CLIENT',
-        ms: Date.now() - startTime,
+        ms: getNow() - startTime,
       });
       return {
         status: 409,
@@ -667,9 +834,8 @@ export async function handleMoveAction(
     const terminalResult: TerminalResult = engineModule.engine.isTerminal(nextState);
 
     if (terminalResult.over) {
-      // Ván đấu kết thúc -> Hoàn tất bảng matches, cập nhật kết quả và dọn dẹp live_state
       const startedAtMs = new Date(match.started_at).getTime();
-      const durationMs = Math.max(0, Date.now() - startedAtMs);
+      const durationMs = Math.max(0, nowMs - startedAtMs);
 
       const participantsResult = participants.map((p) => {
         const playerOutcome = terminalResult.outcomes?.find((o) => o.playerIndex === p.seat_index);
@@ -682,7 +848,7 @@ export async function handleMoveAction(
       await deps.finalizeMatch(
         matchId,
         {
-          ended_at: new Date().toISOString(),
+          ended_at: nowIso,
           duration_ms: durationMs,
           final_state: nextStateSerialized,
           moves: nextMovesSerialized,
@@ -691,7 +857,6 @@ export async function handleMoveAction(
         participantsResult,
       );
 
-      // Xóa match_live_state để giữ DB gọn gàng (kết quả đã lưu ở bảng matches)
       await deps.deleteLiveState(matchId);
     }
 
@@ -703,7 +868,11 @@ export async function handleMoveAction(
       moveIndex: nextMoveIndex,
       moveSerialized,
       currentSeat: nextSeat,
+      stateSerialized: nextStateSerialized,
       terminal: terminalResult.over ? terminalResult : null,
+      clock: nextClock,
+      turnDeadline: nextTurnDeadline,
+      serverNow: nowIso,
     });
 
     deps.log({
@@ -713,7 +882,7 @@ export async function handleMoveAction(
       userId,
       moveIndex: nextMoveIndex,
       outcome: 'accepted',
-      ms: Date.now() - startTime,
+      ms: getNow() - startTime,
     });
 
     return {
@@ -726,6 +895,9 @@ export async function handleMoveAction(
           currentSeat: nextSeat,
           stateSerialized: nextStateSerialized,
           terminal: terminalResult.over ? terminalResult : null,
+          clock: nextClock,
+          turnDeadline: nextTurnDeadline,
+          serverNow: nowIso,
         },
       },
     };
@@ -737,7 +909,408 @@ export async function handleMoveAction(
       userId,
       moveIndex: expectedMoveIndex,
       outcome: 'INTERNAL_ERROR',
-      ms: Date.now() - startTime,
+      ms: getNow() - startTime,
+    });
+    return {
+      status: 500,
+      body: {
+        ok: false,
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: err instanceof Error ? err.message : String(err),
+        },
+      },
+    };
+  }
+}
+
+/**
+ * Xử lý Action 'resign': Đầu hàng / Xin thua ván đấu online.
+ */
+export async function handleResignAction(
+  userId: string,
+  payload: { matchId: string },
+  deps: RefereeDependencies,
+): Promise<CoreResult<unknown>> {
+  const getNow = deps.now || Date.now;
+  const startTime = getNow();
+  const { matchId } = payload;
+
+  try {
+    if (!matchId) {
+      deps.log({
+        fn: 'referee',
+        action: 'resign',
+        matchId: '',
+        userId,
+        outcome: 'BAD_REQUEST',
+        ms: getNow() - startTime,
+      });
+      return {
+        status: 400,
+        body: { ok: false, error: { code: 'BAD_REQUEST', message: 'Thiếu matchId.' } },
+      };
+    }
+
+    const { match, participants } = await deps.loadMatchAndParticipants(matchId);
+    const liveState = await deps.loadLiveState(matchId);
+
+    if (!match) {
+      deps.log({
+        fn: 'referee',
+        action: 'resign',
+        matchId,
+        userId,
+        outcome: 'MATCH_NOT_FOUND',
+        ms: getNow() - startTime,
+      });
+      return {
+        status: 404,
+        body: { ok: false, error: { code: 'MATCH_NOT_FOUND', message: 'Không tìm thấy ván đấu.' } },
+      };
+    }
+
+    const callerParticipant = participants.find((p) => p.user_id === userId);
+    if (!callerParticipant) {
+      deps.log({
+        fn: 'referee',
+        action: 'resign',
+        matchId,
+        userId,
+        outcome: 'NOT_PARTICIPANT',
+        ms: getNow() - startTime,
+      });
+      return {
+        status: 403,
+        body: {
+          ok: false,
+          error: { code: 'NOT_PARTICIPANT', message: 'Bạn không phải đấu thủ của ván đấu này.' },
+        },
+      };
+    }
+
+    if (match.ended_at !== null || !liveState) {
+      // Ván đấu đã kết thúc trước đó -> Idempotent an toàn
+      deps.log({
+        fn: 'referee',
+        action: 'resign',
+        matchId,
+        userId,
+        outcome: 'MATCH_ENDED',
+        ms: getNow() - startTime,
+      });
+      return {
+        status: 409,
+        body: { ok: false, error: { code: 'MATCH_ENDED', message: 'Ván đấu đã kết thúc.' } },
+      };
+    }
+
+    const nowMs = getNow();
+    const nowIso = new Date(nowMs).toISOString();
+
+    // Đọc ngưỡng abort
+    let threshold = 3;
+    if (deps.loadSystemConfig) {
+      const thresholdCfg = await deps.loadSystemConfig('match.abort_move_threshold');
+      if (thresholdCfg && typeof thresholdCfg.moves === 'number') {
+        threshold = Number(thresholdCfg.moves);
+      }
+    }
+
+    const isAbort = liveState.move_index < threshold;
+    const endReason = isAbort ? 'abort' : 'resign';
+    const startedAtMs = new Date(match.started_at).getTime();
+    const durationMs = Math.max(0, nowMs - startedAtMs);
+
+    const participantsResult = participants.map((p) => ({
+      user_id: p.user_id,
+      is_winner: isAbort ? null : p.seat_index !== callerParticipant.seat_index,
+    }));
+
+    await deps.finalizeMatch(
+      matchId,
+      {
+        ended_at: nowIso,
+        duration_ms: durationMs,
+        final_state: liveState.state_serialized,
+        moves: liveState.moves_serialized,
+        end_reason: endReason,
+      },
+      participantsResult,
+    );
+
+    await deps.deleteLiveState(matchId);
+
+    const outcomes = isAbort
+      ? null
+      : participants.map((p) => ({
+          playerIndex: p.seat_index,
+          outcome: (p.seat_index === callerParticipant.seat_index ? 'loss' : 'win') as
+            | 'win'
+            | 'loss',
+        }));
+
+    await deps.broadcast(matchId, 'match_ended', {
+      matchId,
+      reason: endReason,
+      outcomes,
+      serverNow: nowIso,
+    });
+
+    deps.log({
+      fn: 'referee',
+      action: 'resign',
+      matchId,
+      userId,
+      outcome: 'accepted',
+      ms: getNow() - startTime,
+    });
+
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          matchId,
+          reason: endReason,
+          outcomes,
+          serverNow: nowIso,
+        },
+      },
+    };
+  } catch (err) {
+    deps.log({
+      fn: 'referee',
+      action: 'resign',
+      matchId,
+      userId,
+      outcome: 'INTERNAL_ERROR',
+      ms: getNow() - startTime,
+    });
+    return {
+      status: 500,
+      body: {
+        ok: false,
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: err instanceof Error ? err.message : String(err),
+        },
+      },
+    };
+  }
+}
+
+/**
+ * Xử lý Action 'claim_timeout': Đòi xử thắng khi đối thủ quá hạn nước đi.
+ */
+export async function handleClaimTimeoutAction(
+  userId: string,
+  payload: { matchId: string },
+  deps: RefereeDependencies,
+): Promise<CoreResult<unknown>> {
+  const getNow = deps.now || Date.now;
+  const startTime = getNow();
+  const { matchId } = payload;
+
+  try {
+    if (!matchId) {
+      deps.log({
+        fn: 'referee',
+        action: 'claim_timeout',
+        matchId: '',
+        userId,
+        outcome: 'BAD_REQUEST',
+        ms: getNow() - startTime,
+      });
+      return {
+        status: 400,
+        body: { ok: false, error: { code: 'BAD_REQUEST', message: 'Thiếu matchId.' } },
+      };
+    }
+
+    const { match, participants } = await deps.loadMatchAndParticipants(matchId);
+    const liveState = await deps.loadLiveState(matchId);
+
+    if (!match) {
+      deps.log({
+        fn: 'referee',
+        action: 'claim_timeout',
+        matchId,
+        userId,
+        outcome: 'MATCH_NOT_FOUND',
+        ms: getNow() - startTime,
+      });
+      return {
+        status: 404,
+        body: { ok: false, error: { code: 'MATCH_NOT_FOUND', message: 'Không tìm thấy ván đấu.' } },
+      };
+    }
+
+    const callerParticipant = participants.find((p) => p.user_id === userId);
+    if (!callerParticipant) {
+      deps.log({
+        fn: 'referee',
+        action: 'claim_timeout',
+        matchId,
+        userId,
+        outcome: 'NOT_PARTICIPANT',
+        ms: getNow() - startTime,
+      });
+      return {
+        status: 403,
+        body: {
+          ok: false,
+          error: { code: 'NOT_PARTICIPANT', message: 'Bạn không phải đấu thủ của ván đấu này.' },
+        },
+      };
+    }
+
+    if (match.ended_at !== null || !liveState) {
+      deps.log({
+        fn: 'referee',
+        action: 'claim_timeout',
+        matchId,
+        userId,
+        outcome: 'MATCH_ENDED',
+        ms: getNow() - startTime,
+      });
+      return {
+        status: 409,
+        body: { ok: false, error: { code: 'MATCH_ENDED', message: 'Ván đấu đã kết thúc.' } },
+      };
+    }
+
+    // CHỈ NGƯỜI ĐANG CHỜ MỚI ĐƯỢC CLAIM TIMEOUT ĐỐI THỦ
+    if (callerParticipant.seat_index === liveState.current_seat) {
+      deps.log({
+        fn: 'referee',
+        action: 'claim_timeout',
+        matchId,
+        userId,
+        outcome: 'WRONG_TURN',
+        ms: getNow() - startTime,
+      });
+      return {
+        status: 403,
+        body: {
+          ok: false,
+          error: {
+            code: 'WRONG_TURN',
+            message: 'Đang là lượt đi của bạn, không thể tự khiếu nại timeout của chính mình.',
+          },
+        },
+      };
+    }
+
+    const nowMs = getNow();
+    const nowIso = new Date(nowMs).toISOString();
+    const deadlineMs = liveState.turn_deadline
+      ? new Date(liveState.turn_deadline).getTime()
+      : nowMs;
+
+    // KIỂM TRA ĐỒNG HỒ SERVER KÈM GRACE PERIOD 2S
+    if (nowMs <= deadlineMs + CLAIM_TIMEOUT_GRACE_MS) {
+      deps.log({
+        fn: 'referee',
+        action: 'claim_timeout',
+        matchId,
+        userId,
+        outcome: 'TOO_EARLY',
+        ms: getNow() - startTime,
+      });
+      return {
+        status: 409,
+        body: {
+          ok: false,
+          error: {
+            code: 'TOO_EARLY',
+            message: 'Chưa đủ thời gian quá hạn (bao gồm 2 giây bù trễ mạng).',
+          },
+          data: {
+            turnDeadline: liveState.turn_deadline,
+            serverNow: nowIso,
+          },
+        } as unknown as ApiResponseError,
+      };
+    }
+
+    // Đọc ngưỡng abort
+    let threshold = 3;
+    if (deps.loadSystemConfig) {
+      const thresholdCfg = await deps.loadSystemConfig('match.abort_move_threshold');
+      if (thresholdCfg && typeof thresholdCfg.moves === 'number') {
+        threshold = Number(thresholdCfg.moves);
+      }
+    }
+
+    const isAbort = liveState.move_index < threshold;
+    const endReason = isAbort ? 'abort' : 'timeout';
+    const startedAtMs = new Date(match.started_at).getTime();
+    const durationMs = Math.max(0, nowMs - startedAtMs);
+
+    const timedOutSeat = liveState.current_seat;
+    const participantsResult = participants.map((p) => ({
+      user_id: p.user_id,
+      is_winner: isAbort ? null : p.seat_index !== timedOutSeat,
+    }));
+
+    await deps.finalizeMatch(
+      matchId,
+      {
+        ended_at: nowIso,
+        duration_ms: durationMs,
+        final_state: liveState.state_serialized,
+        moves: liveState.moves_serialized,
+        end_reason: endReason,
+      },
+      participantsResult,
+    );
+
+    await deps.deleteLiveState(matchId);
+
+    const outcomes = isAbort
+      ? null
+      : participants.map((p) => ({
+          playerIndex: p.seat_index,
+          outcome: (p.seat_index === timedOutSeat ? 'loss' : 'win') as 'win' | 'loss',
+        }));
+
+    await deps.broadcast(matchId, 'match_ended', {
+      matchId,
+      reason: endReason,
+      outcomes,
+      serverNow: nowIso,
+    });
+
+    deps.log({
+      fn: 'referee',
+      action: 'claim_timeout',
+      matchId,
+      userId,
+      outcome: 'accepted',
+      ms: getNow() - startTime,
+    });
+
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          matchId,
+          reason: endReason,
+          outcomes,
+          serverNow: nowIso,
+        },
+      },
+    };
+  } catch (err) {
+    deps.log({
+      fn: 'referee',
+      action: 'claim_timeout',
+      matchId,
+      userId,
+      outcome: 'INTERNAL_ERROR',
+      ms: getNow() - startTime,
     });
     return {
       status: 500,

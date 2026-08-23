@@ -320,17 +320,20 @@ export async function recordOfflineMatch(params: RecordOfflineMatchParams): Prom
 }
 
 /**
- * Trạng thái bàn cờ trực tiếp của ván đấu online từ bảng `match_live_state` (P3.3c).
+ * Trạng thái bàn cờ trực tiếp của ván đấu online từ bảng `match_live_state` (P3.3c & P3.4c).
  */
 export interface MatchLiveStateSummary {
   readonly stateSerialized: string;
   readonly moveIndex: number;
   readonly currentSeat: number;
   readonly movesSerialized: string;
+  readonly clock?: Record<string, number> | null;
+  readonly turnStartedAt?: string | null;
+  readonly turnDeadline?: string | null;
 }
 
 /**
- * Đọc trạng thái ván đấu online thời gian thực từ bảng `public.match_live_state` (P3.3c).
+ * Đọc trạng thái ván đấu online thời gian thực từ bảng `public.match_live_state` (P3.3c & P3.4c).
  *
  * GHI CHÚ BẢO MẬT:
  * - Policy RLS "Participants can read their match live state" (P3.2b) chỉ cho phép
@@ -343,7 +346,9 @@ export async function getLiveState(matchId: string): Promise<MatchLiveStateSumma
   try {
     const { data, error } = await supabase
       .from('match_live_state')
-      .select('state_serialized, move_index, current_seat, moves_serialized')
+      .select(
+        'state_serialized, move_index, current_seat, moves_serialized, clock, turn_started_at, turn_deadline',
+      )
       .eq('match_id', matchId)
       .maybeSingle();
 
@@ -362,6 +367,9 @@ export async function getLiveState(matchId: string): Promise<MatchLiveStateSumma
       moveIndex: data.move_index,
       currentSeat: data.current_seat,
       movesSerialized: data.moves_serialized,
+      clock: data.clock || null,
+      turnStartedAt: data.turn_started_at || null,
+      turnDeadline: data.turn_deadline || null,
     };
   } catch (err: unknown) {
     if (err instanceof RepoError) throw err;
