@@ -39,7 +39,7 @@ DROP TRIGGER IF EXISTS tr_match_live_state_set_updated_at ON public.match_live_s
 CREATE TRIGGER tr_match_live_state_set_updated_at
   BEFORE UPDATE ON public.match_live_state
   FOR EACH ROW
-  EXECUTE FUNCTION public.set_updated_at();
+  EXECUTE FUNCTION public.handle_updated_at();
 
 -- 3. Bật Row Level Security (RLS)
 ALTER TABLE public.match_live_state ENABLE ROW LEVEL SECURITY;
@@ -89,7 +89,7 @@ BEGIN
     RAISE EXCEPTION 'Đối thủ không hợp lệ hoặc trùng với người tạo' USING ERRCODE = 'P0001';
   END IF;
 
-  IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = p_opponent_id) THEN
+  IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE user_id = p_opponent_id) THEN
     RAISE EXCEPTION 'Không tìm thấy hồ sơ đối thủ' USING ERRCODE = 'P0002';
   END IF;
 
@@ -114,7 +114,7 @@ BEGIN
     match_id,
     user_id,
     seat_index,
-    is_winner,
+    result,
     score
   ) VALUES
     (v_match_id, v_caller_id, 0, NULL, NULL),
