@@ -40,8 +40,8 @@ export interface CaroAiWorkerApi {
  * Cấu hình tham số khởi tạo trận đấu Caro.
  */
 export interface CaroMatchConfig {
-  /** Chế độ chơi: Đấu máy ('vs_ai'), 2 người trên cùng máy ('local_pvp'), hoặc Đấu trực tuyến ('online_1v1') */
-  readonly mode: 'vs_ai' | 'local_pvp' | 'online_1v1';
+  /** Chế độ chơi: Đấu máy ('vs_ai'), 2 người trên cùng máy ('local_pvp'), Đấu trực tuyến ('online_1v1'), hoặc Đấu theo lượt ('online_correspondence') */
+  readonly mode: 'vs_ai' | 'local_pvp' | 'online_1v1' | 'online_correspondence';
   /** Cấp độ khó của AI (bắt buộc khi mode = 'vs_ai') */
   readonly aiLevel?: AiLevel;
   /**

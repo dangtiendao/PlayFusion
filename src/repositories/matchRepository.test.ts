@@ -315,50 +315,117 @@ describe('Match Repository Unit Tests (matchRepository.ts - P2.5a)', () => {
     });
   });
 
-  describe('getMyActiveMatch (P3.5b)', () => {
-    it('12. Tìm thấy ván đấu đang diễn ra của người dùng', async () => {
+  describe('getMyActiveMatches & getMyActiveMatch (P3.5b & P3.6c)', () => {
+    it('12. Tìm thấy danh sách ván đấu đang diễn ra và sắp xếp myTurn lên đầu', async () => {
       vi.spyOn(supabase.auth, 'getUser').mockResolvedValue({
         data: { user: { id: 'usr-123' } as unknown as import('@supabase/supabase-js').User },
         error: null,
       });
 
-      const mockLimit = vi.fn().mockReturnValue({
-        maybeSingle: vi.fn().mockResolvedValue({
-          data: {
-            match_id: 'match-live-uuid',
-            matches: {
-              id: 'match-live-uuid',
-              game_id: 'caro',
-              ended_at: null,
-              mode: 'online_1v1',
-            },
-          },
-          error: null,
-        }),
+      const mockFrom = vi.fn((table: string) => {
+        if (table === 'match_participants') {
+          return {
+            select: vi.fn((fields: string) => {
+              if (fields.includes('matches!inner')) {
+                return {
+                  eq: vi.fn().mockReturnValue({
+                    is: vi.fn().mockReturnValue({
+                      in: vi.fn().mockReturnValue({
+                        order: vi.fn().mockReturnValue({
+                          limit: vi.fn().mockResolvedValue({
+                            data: [
+                              {
+                                match_id: 'match-1',
+                                seat_index: 0,
+                                matches: {
+                                  id: 'match-1',
+                                  game_id: 'caro',
+                                  mode: 'online_correspondence',
+                                  started_at: '2026-08-23T08:00:00Z',
+                                  ended_at: null,
+                                },
+                              },
+                              {
+                                match_id: 'match-2',
+                                seat_index: 1,
+                                matches: {
+                                  id: 'match-2',
+                                  game_id: 'caro',
+                                  mode: 'online_1v1',
+                                  started_at: '2026-08-23T08:10:00Z',
+                                  ended_at: null,
+                                },
+                              },
+                            ],
+                            error: null,
+                          }),
+                        }),
+                      }),
+                    }),
+                  }),
+                };
+              }
+              // Đối thủ
+              return {
+                in: vi.fn().mockReturnValue({
+                  neq: vi.fn().mockResolvedValue({
+                    data: [
+                      {
+                        match_id: 'match-1',
+                        seat_index: 1,
+                        profiles: { display_name: 'Opponent 1', avatar_url: null },
+                      },
+                      {
+                        match_id: 'match-2',
+                        seat_index: 0,
+                        profiles: { display_name: 'Opponent 2', avatar_url: null },
+                      },
+                    ],
+                    error: null,
+                  }),
+                }),
+              };
+            }),
+          };
+        }
+        if (table === 'match_live_state') {
+          return {
+            select: vi.fn().mockReturnValue({
+              in: vi.fn().mockResolvedValue({
+                data: [
+                  { match_id: 'match-1', current_seat: 0, turn_deadline: '2026-08-24T08:00:00Z' }, // myTurn = true (seat 0 == seat 0)
+                  { match_id: 'match-2', current_seat: 0, turn_deadline: '2026-08-23T08:15:00Z' }, // myTurn = false (seat 1 != seat 0)
+                ],
+                error: null,
+              }),
+            }),
+          };
+        }
+        return {};
       });
 
-      const mockOrder = vi.fn().mockReturnValue({ limit: mockLimit });
-      const mockEqMode = vi.fn().mockReturnValue({ order: mockOrder });
-      const mockIsEndedAt = vi.fn().mockReturnValue({ eq: mockEqMode });
-      const mockEqUserId = vi.fn().mockReturnValue({ is: mockIsEndedAt });
-      const mockSelect = vi.fn().mockReturnValue({ eq: mockEqUserId });
+      vi.spyOn(supabase, 'from').mockImplementation(mockFrom as unknown as typeof supabase.from);
 
-      vi.spyOn(supabase, 'from').mockReturnValue({
-        select: mockSelect,
-      } as unknown as ReturnType<typeof supabase.from>);
+      const matches = await matchRepo.getMyActiveMatches();
+      expect(matches).toHaveLength(2);
+      expect(matches[0]?.matchId).toBe('match-1');
+      expect(matches[0]?.myTurn).toBe(true);
+      expect(matches[0]?.opponentName).toBe('Opponent 1');
+      expect(matches[1]?.matchId).toBe('match-2');
+      expect(matches[1]?.myTurn).toBe(false);
 
-      const activeMatch = await matchRepo.getMyActiveMatch();
-      expect(activeMatch).toEqual({
-        matchId: 'match-live-uuid',
-        gameId: 'caro',
-      });
+      const singleMatch = await matchRepo.getMyActiveMatch();
+      expect(singleMatch?.matchId).toBe('match-2'); // match-2 là online_1v1
     });
 
-    it('13. Trả về null khi không có ván đấu nào đang sống hoặc chưa đăng nhập', async () => {
+    it('13. Trả về mảng rỗng khi không có ván đấu nào đang sống hoặc chưa đăng nhập', async () => {
       vi.spyOn(supabase.auth, 'getUser').mockResolvedValue({
         data: { user: null as unknown as import('@supabase/supabase-js').User },
         error: null,
       });
+
+      const matches = await matchRepo.getMyActiveMatches();
+      expect(matches).toEqual([]);
 
       const activeMatch = await matchRepo.getMyActiveMatch();
       expect(activeMatch).toBeNull();

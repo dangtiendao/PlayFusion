@@ -65,8 +65,8 @@ export const ModeSelect: React.FC<ModeSelectProps> = ({
   const availableModes = useMemo(
     () =>
       definition.modes.filter(
-        (m): m is 'vs_ai' | 'local_pvp' | 'online_1v1' =>
-          m === 'vs_ai' || m === 'local_pvp' || m === 'online_1v1',
+        (m): m is 'vs_ai' | 'local_pvp' | 'online_1v1' | 'online_correspondence' =>
+          m === 'vs_ai' || m === 'local_pvp' || m === 'online_1v1' || m === 'online_correspondence',
       ),
     [definition.modes],
   );
@@ -92,7 +92,9 @@ export const ModeSelect: React.FC<ModeSelectProps> = ({
   const savedConfig = savedMatch?.gameConfig as CaroMatchConfig | undefined;
 
   // State cấu hình trước khi vào trận
-  const [selectedMode, setSelectedMode] = useState<'vs_ai' | 'local_pvp' | 'online_1v1'>(() => {
+  const [selectedMode, setSelectedMode] = useState<
+    'vs_ai' | 'local_pvp' | 'online_1v1' | 'online_correspondence'
+  >(() => {
     return availableModes.includes('vs_ai') ? 'vs_ai' : (availableModes[0] ?? 'local_pvp');
   });
 
@@ -104,7 +106,7 @@ export const ModeSelect: React.FC<ModeSelectProps> = ({
 
   // Xử lý chọn chế độ
   const handleSelectMode = useCallback(
-    (mode: 'vs_ai' | 'local_pvp' | 'online_1v1') => {
+    (mode: 'vs_ai' | 'local_pvp' | 'online_1v1' | 'online_correspondence') => {
       shellApi?.playSfx('click');
       shellApi?.hapticTap();
 
@@ -114,6 +116,9 @@ export const ModeSelect: React.FC<ModeSelectProps> = ({
       } else if (mode === 'online_1v1') {
         // Chế độ online 1v1: Vào sảnh phòng đấu
         onStart({ mode: 'online_1v1' });
+      } else if (mode === 'online_correspondence') {
+        // Chế độ chơi theo lượt: Vào sảnh phòng đấu theo lượt
+        onStart({ mode: 'online_correspondence' });
       } else {
         setSelectedMode('vs_ai');
       }
@@ -277,7 +282,9 @@ export const ModeSelect: React.FC<ModeSelectProps> = ({
                 }`}
               >
                 <div className="flex items-center gap-3 text-left">
-                  <span className="text-xl">{mode === 'vs_ai' ? '🤖' : '👥'}</span>
+                  <span className="text-xl">
+                    {mode === 'vs_ai' ? '🤖' : mode === 'online_correspondence' ? '📬' : '👥'}
+                  </span>
                   <div>
                     <h3 className="text-sm font-bold">{getModeLabel(mode as GameMode)}</h3>
                     <p className="text-xs opacity-75 font-normal">

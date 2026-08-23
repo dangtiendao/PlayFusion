@@ -33,8 +33,12 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import type { MatchResultReport } from '@engines/types';
 import { caroManifest } from '@engines/caro/manifest';
 import { caroEngine, DEFAULT_CARO_OPTIONS, checkWinAt, type CaroState } from '@engines/caro';
-import { InteractiveBoard, MatchEndOverlay } from './components';
-import { MatchClock } from './components/MatchClock';
+import {
+  InteractiveBoard,
+  MatchEndOverlay,
+  MatchClock,
+  CorrespondenceDeadline,
+} from './components';
 import { useMatchChannel, type PresenceMember } from '@/transport';
 import { useTransportReconnectAttempt } from '@/stores/transportStore';
 import { refereeRepository } from '@/repositories/refereeRepository';
@@ -79,10 +83,16 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
   const [currentSeat, setCurrentSeat] = useState(0);
   const [lastMoveCell, setLastMoveCell] = useState<number | null>(null);
 
-  // ĐỒNG HỒ & BÙ LỆCH GIỜ (P3.4c)
+  // ĐỒNG HỒ & BÙ LỆCH GIỜ (P3.4c & P3.6c)
   const [clock, setClock] = useState<Record<string, number> | null>(null);
   const [turnDeadline, setTurnDeadline] = useState<string | null>(null);
   const [clockOffset, setClockOffset] = useState<number>(0);
+  const [timeControl, setTimeControl] = useState<{
+    kind?: 'realtime' | 'correspondence';
+    baseSeconds?: number;
+    incrementSeconds?: number;
+    perMoveSeconds?: number;
+  } | null>(null);
 
   // Trạng thái gửi nước đi & Lỗi có thể retry
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -235,11 +245,15 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
       if (liveState.clock) setClock(liveState.clock);
       if (liveState.turnDeadline) setTurnDeadline(liveState.turnDeadline);
       if (liveState.serverNow) setClockOffset(computeOffset(liveState.serverNow));
+      if (liveState.timeControl) setTimeControl(liveState.timeControl);
 
       // Nạp thông tin đối thủ từ bảng match_participants
       try {
         const matchDetail = await matchRepository.getMatchById(matchId);
         if (matchDetail) {
+          if (matchDetail.mode === 'online_correspondence') {
+            setTimeControl((prev) => prev || { kind: 'correspondence', perMoveSeconds: 86400 });
+          }
           const opp = matchDetail.participants.find(
             (p: { seatIndex: number; displayName?: string }) => p.seatIndex !== mySeat,
           );
@@ -571,7 +585,10 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
     }
   }, [matchId, mySeat]);
 
-  // 10. XỬ LÝ THOÁT KHỎI GAMESHELL AN TOÀN
+  // Xác định chế độ chơi theo lượt (Correspondence) hay Thời gian thực (Realtime)
+  const isCorrespondence = timeControl?.kind === 'correspondence';
+
+  // 10. XỬ LÝ THOÁT KHỎI GAMESHELL AN TOÀN (P3.4c & P3.6c)
   const handleExitRequest = useCallback(() => {
     if (isGameOver) {
       navigate('/');
@@ -582,13 +599,16 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
 
   const handleConfirmExit = useCallback(async () => {
     setShowExitDialog(false);
-    try {
-      await refereeRepository.resign(matchId);
-    } catch {
-      // Bỏ qua
+    // [LƯU Ý P3.6c]: CHẾ ĐỘ CORRESPONDENCE ĐƯỢC THOÁT TỰ DO KHÔNG RESIGN
+    if (!isCorrespondence) {
+      try {
+        await refereeRepository.resign(matchId);
+      } catch {
+        // Bỏ qua
+      }
     }
     navigate('/');
-  }, [matchId, navigate]);
+  }, [isCorrespondence, matchId, navigate]);
 
   // Xác định trạng thái lượt & Khóa bàn cờ
   // [LƯU Ý P3.5c]: Lượt của mình khi đối thủ away VẪN ĐƯỢC ĐÁNH BÌNH THƯỜNG (không khóa bàn cờ của mình)
@@ -603,7 +623,7 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
   const matchReport: MatchResultReport = useMemo(
     () => ({
       gameId: 'caro',
-      mode: 'online_1v1',
+      mode: isCorrespondence ? 'online_correspondence' : 'online_1v1',
       durationMs: 60000,
       participants: [
         {
@@ -618,7 +638,7 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
         },
       ],
     }),
-    [winnerSeat],
+    [isCorrespondence, winnerSeat],
   );
 
   if (loading) {
@@ -651,7 +671,7 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
     <GameShell
       definition={caroManifest}
       onExit={handleExitRequest}
-      isGameCompleted={isGameOver}
+      isGameCompleted={true}
       hasAutoSave={false}
     >
       <div
@@ -731,17 +751,28 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
             </div>
           )}
 
-          {/* ĐỒNG HỒ VÁN CỜ TRỰC TUYẾN (P3.4c) */}
-          <MatchClock
-            clock={clock}
-            turnDeadline={turnDeadline}
-            currentSeat={currentSeat}
-            mySeat={mySeat}
-            opponentName={opponentName}
-            clockOffset={clockOffset}
-            isGameOver={isGameOver}
-            onHapticTick={() => hapticTap()}
-          />
+          {/* ĐỒNG HỒ / HẠN NƯỚC ĐI VÁN CỜ TRỰC TUYẾN (P3.4c & P3.6c) */}
+          {isCorrespondence ? (
+            <CorrespondenceDeadline
+              turnDeadline={turnDeadline}
+              clockOffset={clockOffset}
+              isMyTurn={isMyTurn}
+              isGameOver={isGameOver}
+              opponentName={opponentName}
+              onTick={() => hapticTap()}
+            />
+          ) : (
+            <MatchClock
+              clock={clock}
+              turnDeadline={turnDeadline}
+              currentSeat={currentSeat}
+              mySeat={mySeat}
+              opponentName={opponentName}
+              clockOffset={clockOffset}
+              isGameOver={isGameOver}
+              onHapticTick={() => hapticTap()}
+            />
+          )}
 
           {/* Banner trạng thái MẤT KẾT NỐI — ĐANG TỰ ĐỘNG NỐI LẠI (P3.5a & P3.5b) */}
           {transportStatus === 'reconnecting' && (
@@ -935,13 +966,15 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
         {/* Modal xác nhận Thoát khỏi GameShell */}
         <ConfirmDialog
           isOpen={showExitDialog}
-          title="Rời khỏi ván đấu?"
+          title={isCorrespondence ? 'Rời ván đấu?' : 'Rời khỏi ván đấu?'}
           message={
-            moveIndex < 3
-              ? 'Thoát ra sẽ hủy ván đấu (không tính kết quả). Bạn có chắc chắn muốn rời phòng?'
-              : 'Thoát trận giữa chừng sẽ tính là đầu hàng và bạn bị xử thua. Bạn có chắc chắn muốn rời trận?'
+            isCorrespondence
+              ? 'Ván cờ sẽ được lưu và chờ bạn quay lại. Đối thủ có thời gian để thực hiện nước đi.'
+              : moveIndex < 3
+                ? 'Thoát ra sẽ hủy ván đấu (không tính kết quả). Bạn có chắc chắn muốn rời phòng?'
+                : 'Thoát trận giữa chừng sẽ tính là đầu hàng và bạn bị xử thua. Bạn có chắc chắn muốn rời trận?'
           }
-          confirmText="Rời trận"
+          confirmText={isCorrespondence ? 'Rời ván' : 'Rời trận'}
           cancelText="Ở lại"
           onConfirm={handleConfirmExit}
           onCancel={() => setShowExitDialog(false)}

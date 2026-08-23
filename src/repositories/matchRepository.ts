@@ -383,34 +383,136 @@ export interface ActiveMatchInfo {
   readonly gameId: string;
 }
 
+export interface ActiveMatchItem {
+  readonly matchId: string;
+  readonly gameId: string;
+  readonly mode: string;
+  readonly mySeat: number;
+  readonly currentSeat: number;
+  readonly myTurn: boolean;
+  readonly turnDeadline: string | null;
+  readonly opponentName: string;
+  readonly opponentAvatarUrl?: string | null;
+  readonly startedAt: string;
+}
+
+/**
+ * Lấy danh sách toàn bộ các ván đấu online đang diễn ra của người chơi hiện tại (cả realtime và correspondence).
+ * Tối đa 10 ván, sắp xếp ván tới lượt (myTurn = true) lên đầu, sau đó theo turnDeadline gần nhất.
+ */
+export async function getMyActiveMatches(): Promise<ActiveMatchItem[]> {
+  try {
+    const userRes = await supabase.auth.getUser();
+    const userId = userRes.data.user?.id;
+    if (!userId) return [];
+
+    // Query 1: Lấy danh sách trận mà tôi tham gia và chưa kết thúc
+    const { data: myParts, error: partErr } = await supabase
+      .from('match_participants')
+      .select('match_id, seat_index, matches!inner(id, game_id, mode, started_at, ended_at)')
+      .eq('user_id', userId)
+      .is('matches.ended_at', null)
+      .in('matches.mode', ['online_1v1', 'online_correspondence'])
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    if (partErr || !myParts || myParts.length === 0) return [];
+
+    const matchIds = myParts.map((p) => p.match_id);
+
+    // Query 2a: Lấy live_state để biết current_seat và turn_deadline
+    const { data: liveStates } = await supabase
+      .from('match_live_state')
+      .select('match_id, current_seat, turn_deadline')
+      .in('match_id', matchIds);
+
+    // Query 2b: Lấy thông tin đối thủ (tên hiển thị, avatar)
+    const { data: oppParts } = await supabase
+      .from('match_participants')
+      .select('match_id, seat_index, profiles(display_name, avatar_url)')
+      .in('match_id', matchIds)
+      .neq('user_id', userId);
+
+    const liveStateMap = new Map<string, { current_seat: number; turn_deadline: string | null }>();
+    if (liveStates) {
+      for (const ls of liveStates) {
+        liveStateMap.set(ls.match_id, {
+          current_seat: ls.current_seat,
+          turn_deadline: ls.turn_deadline,
+        });
+      }
+    }
+
+    const oppMap = new Map<string, { display_name?: string; avatar_url?: string }>();
+    if (oppParts) {
+      for (const op of oppParts) {
+        const prof = Array.isArray(op.profiles) ? op.profiles[0] : op.profiles;
+        if (prof) {
+          oppMap.set(op.match_id, {
+            display_name: prof.display_name,
+            avatar_url: prof.avatar_url,
+          });
+        }
+      }
+    }
+
+    const items: ActiveMatchItem[] = [];
+    for (const part of myParts) {
+      const matchData = Array.isArray(part.matches) ? part.matches[0] : part.matches;
+      if (!matchData || !matchData.id) continue;
+
+      const ls = liveStateMap.get(part.match_id);
+      const currentSeat = ls?.current_seat ?? 0;
+      const turnDeadline = ls?.turn_deadline ?? null;
+      const opp = oppMap.get(part.match_id);
+
+      const mySeat = part.seat_index;
+      const myTurn = currentSeat === mySeat;
+
+      items.push({
+        matchId: matchData.id,
+        gameId: matchData.game_id,
+        mode: matchData.mode,
+        mySeat,
+        currentSeat,
+        myTurn,
+        turnDeadline,
+        opponentName: opp?.display_name || 'Đối thủ',
+        opponentAvatarUrl: opp?.avatar_url || null,
+        startedAt: matchData.started_at,
+      });
+    }
+
+    // Sắp xếp: ván tới lượt lên đầu, sau đó theo hạn chót gần nhất
+    items.sort((a, b) => {
+      if (a.myTurn !== b.myTurn) {
+        return a.myTurn ? -1 : 1;
+      }
+      if (a.turnDeadline && b.turnDeadline) {
+        return new Date(a.turnDeadline).getTime() - new Date(b.turnDeadline).getTime();
+      }
+      return new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime();
+    });
+
+    return items;
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Lấy thông tin ván đấu online đang diễn ra của người chơi hiện tại (nếu có).
  * Dùng để hiển thị banner khôi phục ván đấu khi mở lại app hoặc chuyển sang visible.
  */
 export async function getMyActiveMatch(): Promise<ActiveMatchInfo | null> {
   try {
-    const userRes = await supabase.auth.getUser();
-    const userId = userRes.data.user?.id;
-    if (!userId) return null;
-
-    const { data, error } = await supabase
-      .from('match_participants')
-      .select('match_id, matches!inner(id, game_id, ended_at, mode)')
-      .eq('user_id', userId)
-      .is('matches.ended_at', null)
-      .eq('matches.mode', 'online_1v1')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (error || !data || !data.matches) return null;
-
-    const matchData = Array.isArray(data.matches) ? data.matches[0] : data.matches;
-    if (!matchData || !matchData.id || !matchData.game_id) return null;
-
+    const matches = await getMyActiveMatches();
+    if (matches.length === 0) return null;
+    const match = matches.find((m) => m.mode === 'online_1v1') ?? matches[0];
+    if (!match) return null;
     return {
-      matchId: matchData.id,
-      gameId: matchData.game_id,
+      matchId: match.matchId,
+      gameId: match.gameId,
     };
   } catch {
     return null;
@@ -423,4 +525,5 @@ export const matchRepository = {
   recordOfflineMatch,
   getLiveState,
   getMyActiveMatch,
+  getMyActiveMatches,
 };

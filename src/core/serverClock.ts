@@ -73,3 +73,55 @@ export function formatMmSs(ms: number): string {
   const ss = String(seconds).padStart(2, '0');
   return `${mm}:${ss}`;
 }
+
+/**
+ * Format thời gian còn lại thân thiện cho Correspondence (P3.6c)
+ */
+export function formatCorrespondenceRemaining(remainingMs: number): {
+  readonly text: string;
+  readonly level: 'normal' | 'warning' | 'danger' | 'expired';
+} {
+  if (remainingMs <= 0) {
+    return { text: 'Đã quá hạn!', level: 'expired' };
+  }
+
+  const totalSec = Math.floor(remainingMs / 1000);
+  const hours = Math.floor(totalSec / 3600);
+  const minutes = Math.floor((totalSec % 3600) / 60);
+
+  // Mức 1: Dưới 10 phút -> Đếm mm:ss
+  if (remainingMs < 10 * 60 * 1000) {
+    return { text: formatMmSs(remainingMs), level: 'danger' };
+  }
+
+  // Mức 2: Dưới 1 giờ -> Hiển thị số phút
+  if (remainingMs < 60 * 60 * 1000) {
+    const mins = Math.max(1, Math.ceil(remainingMs / 60000));
+    return { text: `Còn ${mins} phút`, level: 'warning' };
+  }
+
+  // Mức 3: Từ 1 giờ trở lên -> Hiển thị Giờ và Phút
+  if (minutes === 0) {
+    return { text: `Còn ${hours} giờ`, level: 'normal' };
+  }
+  return { text: `Còn ${hours} giờ ${minutes} phút`, level: 'normal' };
+}
+
+/**
+ * Format thời gian rút gọn cho danh sách ván đấu (P3.6c)
+ */
+export function formatShortDeadline(deadlineIso: string | null): {
+  readonly text: string;
+  readonly isExpired: boolean;
+  readonly isUrgent: boolean;
+} {
+  if (!deadlineIso) return { text: '--', isExpired: false, isUrgent: false };
+  const diffMs = new Date(deadlineIso).getTime() - Date.now();
+  if (diffMs <= 0) return { text: 'QUÁ HẠN', isExpired: true, isUrgent: true };
+
+  const totalMin = Math.floor(diffMs / 60000);
+  if (totalMin < 60)
+    return { text: `${Math.max(1, totalMin)}m`, isExpired: false, isUrgent: totalMin < 10 };
+  const hours = Math.floor(totalMin / 60);
+  return { text: `${hours}h`, isExpired: false, isUrgent: false };
+}

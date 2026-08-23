@@ -4,7 +4,7 @@ import { getAllGames } from '@/games/registry';
 import { GameCard } from '@/components/games/GameCard';
 import { getCategoryConfig } from '@/games/labels';
 import { removeVietnameseTones } from '@/core/text';
-import { ActiveMatchBanner } from '@/components/ActiveMatchBanner';
+import { ActiveMatchesPanel } from '@/components/ActiveMatchesPanel';
 import type { GameCategory } from '@engines/types';
 
 /**
@@ -75,8 +75,8 @@ export function HomePage() {
 
   return (
     <div className="space-y-5 pb-6">
-      {/* BANNER TRẬN ĐẤU DỞ DANG (P3.5b) */}
-      <ActiveMatchBanner />
+      {/* DANH SÁCH VÁN ĐẤU ONLINE ĐANG DIỄN RA (P3.5b & P3.6c) */}
+      <ActiveMatchesPanel />
 
       {/* 1. THANH TÌM KIẾM TRÒ CHƠI */}
       <div className="relative">

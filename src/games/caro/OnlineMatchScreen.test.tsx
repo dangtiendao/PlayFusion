@@ -469,4 +469,76 @@ describe('Caro OnlineMatchScreen Component Tests (P3.3c & P3.4c)', () => {
       expect(screen.getByTestId('manual-retry-btn')).toBeDefined();
     });
   });
+
+  it('9. Ván đấu correspondence: Render CorrespondenceDeadline và Thoát tự do không gọi resign', async () => {
+    vi.mocked(refereeRepository.initMatch).mockResolvedValueOnce({
+      stateSerialized: serializedEmpty,
+      moveIndex: 0,
+      currentSeat: 0,
+      movesSerialized: '',
+      clock: null,
+      turnDeadline: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+      timeControl: { kind: 'correspondence', perMoveSeconds: 86400 },
+    });
+
+    renderScreen(0);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('correspondence-deadline-banner')).toBeDefined();
+      expect(screen.queryByTestId('my-clock-box')).toBeNull(); // KHÔNG RENDER MATCHCLOCK REALTIME
+    });
+
+    // Bấm nút Thoát
+    const exitBtn = screen.getByRole('button', { name: /Quay lại Sảnh trò chơi/i });
+    fireEvent.click(exitBtn);
+
+    // Modal thoát hiện thông báo lưu ván chờ quay lại
+    await waitFor(() => {
+      expect(screen.getByText(/Ván cờ sẽ được lưu và chờ bạn quay lại/i)).toBeDefined();
+    });
+
+    // Xác nhận thoát
+    const confirmExitBtn = screen.getByText('Rời ván');
+    fireEvent.click(confirmExitBtn);
+
+    expect(refereeRepository.resign).not.toHaveBeenCalled(); // TUYỆT ĐỐI KHÔNG GỌI RESIGN
+    expect(mockNavigate).toHaveBeenCalledWith('/');
+  });
+
+  it('10. Ván đấu realtime: Render MatchClock và Thoát gọi resign', async () => {
+    vi.mocked(refereeRepository.initMatch).mockResolvedValueOnce({
+      stateSerialized: serializedEmpty,
+      moveIndex: 0,
+      currentSeat: 0,
+      movesSerialized: '',
+      clock: { '0': 300000, '1': 300000 },
+      turnDeadline: new Date(Date.now() + 300000).toISOString(),
+      timeControl: { kind: 'realtime', baseSeconds: 300, incrementSeconds: 5 },
+    });
+
+    renderScreen(0);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('my-clock-box')).toBeDefined();
+      expect(screen.queryByTestId('correspondence-deadline-banner')).toBeNull();
+    });
+
+    // Bấm nút Thoát
+    const exitBtn = screen.getByRole('button', { name: /Quay lại Sảnh trò chơi/i });
+    fireEvent.click(exitBtn);
+
+    // Modal thoát cảnh báo xử thua / hủy ván
+    await waitFor(() => {
+      expect(screen.getByText(/Thoát ra sẽ hủy ván đấu/i)).toBeDefined();
+    });
+
+    // Xác nhận thoát
+    const confirmExitBtn = screen.getByRole('button', { name: 'Rời trận' });
+    fireEvent.click(confirmExitBtn);
+
+    expect(refereeRepository.resign).toHaveBeenCalledWith('match-uuid-123'); // GỌI RESIGN
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/');
+    });
+  });
 });
