@@ -31,6 +31,23 @@ import { EngineError, type TerminalResult } from '../../../packages/engines/type
 import type { ApiResponseError, ApiResponseSuccess } from '../_shared/response.ts';
 import { getGameEngineModule } from './engines.ts';
 
+/**
+ * Cấu hình kiểm soát thời gian thi đấu:
+ * - 'realtime': Quỹ giờ dồn ban đầu + increment sau mỗi nước hợp lệ (P3.4).
+ *   (Bản ghi cũ thiếu kind -> mặc định hiểu là 'realtime').
+ * - 'correspondence': Đấu theo lượt kiểu thư tín, mỗi nước có thời hạn tươi riêng tính bằng giây (P3.6b).
+ */
+export type MatchTimeControl =
+  | {
+      readonly kind?: 'realtime';
+      readonly baseSeconds: number;
+      readonly incrementSeconds?: number;
+    }
+  | {
+      readonly kind: 'correspondence';
+      readonly perMoveSeconds: number;
+    };
+
 export interface MatchRecord {
   readonly id: string;
   readonly game_id: string;
@@ -38,7 +55,48 @@ export interface MatchRecord {
   readonly ended_at: string | null;
   readonly started_at: string;
   readonly options?: Record<string, unknown> | null;
-  readonly time_control?: { baseSeconds: number; incrementSeconds?: number } | null;
+  readonly time_control?: MatchTimeControl | null;
+}
+
+/**
+ * Hàm thuần tính toán đồng hồ và thời hạn nước đi kế tiếp sau khi áp dụng nước đi thành công.
+ * - Realtime: Trừ thời gian đã trôi qua, cộng increment cho người vừa đi, tính deadline người kế theo clock của họ.
+ * - Correspondence: Mỗi lượt cấp thời hạn tươi mới (perMoveSeconds), KHÔNG cộng dồn phần dư, clock giữ null.
+ */
+export function computeDeadlineAfterMove(
+  timeControl: MatchTimeControl | null | undefined,
+  currentClock: Record<string, number> | null | undefined,
+  currentSeat: number,
+  nextSeat: number,
+  remainingSeatClockMs: number,
+  nowMs: number,
+): { nextClock: Record<string, number> | null; nextTurnDeadline: string } {
+  const isCorrespondence = timeControl?.kind === 'correspondence';
+
+  if (isCorrespondence) {
+    const perMoveSeconds = timeControl.perMoveSeconds ?? 86400;
+    const nextTurnDeadline = new Date(nowMs + perMoveSeconds * 1000).toISOString();
+    return {
+      nextClock: null,
+      nextTurnDeadline,
+    };
+  }
+
+  // Realtime
+  const incrementSeconds =
+    (timeControl && 'incrementSeconds' in timeControl ? timeControl.incrementSeconds : 5) ?? 5;
+  const newSeatClockMs = remainingSeatClockMs + incrementSeconds * 1000;
+  const nextClock: Record<string, number> = {
+    ...(currentClock || {}),
+    [String(currentSeat)]: newSeatClockMs,
+  };
+  const nextSeatRemainingMs = nextClock[String(nextSeat)] ?? 300000;
+  const nextTurnDeadline = new Date(nowMs + nextSeatRemainingMs).toISOString();
+
+  return {
+    nextClock,
+    nextTurnDeadline,
+  };
 }
 
 export interface ParticipantRecord {
@@ -224,6 +282,7 @@ export async function handleInitAction(
             clock: existingLiveState.clock || null,
             turnDeadline: existingLiveState.turn_deadline || null,
             serverNow: nowIso,
+            timeControl: match.time_control || null,
           },
         },
       };
@@ -262,34 +321,67 @@ export async function handleInitAction(
     const stateSerialized = engineModule.engine.serialize(initialState);
     const currentSeat = engineModule.engine.currentPlayer(initialState);
 
-    // 6. Đọc cấu hình Time Control từ system_config hoặc default
-    let timeControl = match.time_control;
-    if (!timeControl && deps.loadSystemConfig) {
-      const configVal = await deps.loadSystemConfig('match.default_time_control');
-      if (configVal && typeof configVal.baseSeconds === 'number') {
-        timeControl = {
-          baseSeconds: Number(configVal.baseSeconds),
-          incrementSeconds: Number(configVal.incrementSeconds || 0),
-        };
-      }
-    }
-    const baseSeconds = timeControl?.baseSeconds ?? 300;
-    const baseMs = baseSeconds * 1000;
+    // 6. Đọc cấu hình Time Control từ system_config hoặc default theo mode
+    const isCorrespondence = match.mode === 'online_correspondence';
+    let timeControl: MatchTimeControl = match.time_control || (null as unknown as MatchTimeControl);
 
-    // Khởi tạo quỹ giờ theo seat_index
-    const initialClock: Record<string, number> = {};
-    for (const p of participants) {
-      initialClock[String(p.seat_index)] = baseMs;
-    }
-    // Nếu chưa có participants, mặc định 2 seat
-    if (participants.length === 0) {
-      initialClock['0'] = baseMs;
-      initialClock['1'] = baseMs;
+    let initialClock: Record<string, number> | null = null;
+    let turnDeadlineIso: string;
+
+    if (isCorrespondence) {
+      // Đọc cấu hình giờ cho chế độ chơi theo lượt (Correspondence)
+      if (!timeControl && deps.loadSystemConfig) {
+        const configVal = await deps.loadSystemConfig('match.correspondence_per_move_hours');
+        if (configVal && typeof configVal.hours === 'number') {
+          timeControl = {
+            kind: 'correspondence',
+            perMoveSeconds: Number(configVal.hours) * 3600,
+          };
+        }
+      }
+      const perMoveSeconds =
+        (timeControl && 'perMoveSeconds' in timeControl ? timeControl.perMoveSeconds : null) ??
+        86400; // Mặc định 24h = 86,400s
+      timeControl = { kind: 'correspondence', perMoveSeconds };
+
+      // CORRESPONDENCE KHÔNG CÓ QUỸ GIỜ DỒN: clock = NULL
+      initialClock = null;
+      turnDeadlineIso = new Date(getNow() + perMoveSeconds * 1000).toISOString();
+    } else {
+      // Chế độ Realtime (P3.4): Đọc cấu hình time_control dồn
+      if (!timeControl && deps.loadSystemConfig) {
+        const configVal = await deps.loadSystemConfig('match.default_time_control');
+        if (configVal && typeof configVal.baseSeconds === 'number') {
+          timeControl = {
+            kind: 'realtime',
+            baseSeconds: Number(configVal.baseSeconds),
+            incrementSeconds: Number(configVal.incrementSeconds || 0),
+          };
+        }
+      }
+      const baseSeconds =
+        (timeControl && 'baseSeconds' in timeControl ? timeControl.baseSeconds : null) ?? 300;
+      const incrementSeconds =
+        (timeControl && 'incrementSeconds' in timeControl ? timeControl.incrementSeconds : 0) ?? 5;
+      timeControl = { kind: 'realtime', baseSeconds, incrementSeconds };
+      const baseMs = baseSeconds * 1000;
+
+      // Khởi tạo quỹ giờ theo seat_index
+      initialClock = {};
+      for (const p of participants) {
+        initialClock[String(p.seat_index)] = baseMs;
+      }
+      // Nếu chưa có participants, mặc định 2 seat
+      if (participants.length === 0) {
+        initialClock['0'] = baseMs;
+        initialClock['1'] = baseMs;
+      }
+
+      const currentSeatBaseMs = initialClock[String(currentSeat)] ?? baseMs;
+      turnDeadlineIso = new Date(getNow() + currentSeatBaseMs).toISOString();
     }
 
     const turnStartedAtIso = nowIso;
-    const currentSeatBaseMs = initialClock[String(currentSeat)] ?? baseMs;
-    const turnDeadlineIso = new Date(getNow() + currentSeatBaseMs).toISOString();
 
     // 7. Ghi bản ghi vào match_live_state
     await deps.insertLiveState({
@@ -312,6 +404,7 @@ export async function handleInitAction(
       clock: initialClock,
       turnDeadline: turnDeadlineIso,
       serverNow: nowIso,
+      timeControl,
     });
 
     deps.log({
@@ -335,6 +428,7 @@ export async function handleInitAction(
           clock: initialClock,
           turnDeadline: turnDeadlineIso,
           serverNow: nowIso,
+          timeControl,
         },
       },
     };
@@ -538,15 +632,35 @@ export async function handleMoveAction(
     // ==============================================================================
     // [BƯỚC MỚI: TÍNH GIỜ SERVER-SIDE]
     // ==============================================================================
-    const seatKey = String(callerParticipant.seat_index);
-    const turnStartedMs = liveState.turn_started_at
-      ? new Date(liveState.turn_started_at).getTime()
-      : nowMs;
-    const elapsedMs = Math.max(0, nowMs - turnStartedMs);
-    const currentSeatClockMs = liveState.clock?.[seatKey] ?? 300000;
-    const remainingMs = currentSeatClockMs - elapsedMs;
+    const isCorrespondence =
+      match.mode === 'online_correspondence' || match.time_control?.kind === 'correspondence';
+    let isTimedOut = false;
+    let remainingMs = 0;
 
-    if (remainingMs <= 0) {
+    if (isCorrespondence) {
+      // Chế độ chơi theo lượt (Correspondence): So sánh trực tiếp mốc turn_deadline tươi
+      const deadlineMs = liveState.turn_deadline
+        ? new Date(liveState.turn_deadline).getTime()
+        : nowMs;
+      if (nowMs > deadlineMs) {
+        isTimedOut = true;
+      }
+    } else {
+      // Chế độ Realtime (P3.4): Tính elapsed trừ vào quỹ giờ tích lũy
+      const seatKey = String(callerParticipant.seat_index);
+      const turnStartedMs = liveState.turn_started_at
+        ? new Date(liveState.turn_started_at).getTime()
+        : nowMs;
+      const elapsedMs = Math.max(0, nowMs - turnStartedMs);
+      const currentSeatClockMs = liveState.clock?.[seatKey] ?? 300000;
+      remainingMs = currentSeatClockMs - elapsedMs;
+
+      if (remainingMs <= 0) {
+        isTimedOut = true;
+      }
+    }
+
+    if (isTimedOut) {
       // NGƯỜI GỬI ĐÃ HẾT GIỜ KHI CỐ GỬI NƯỚC ĐI MUỘN
       let threshold = 3;
       if (deps.loadSystemConfig) {
@@ -771,15 +885,8 @@ export async function handleMoveAction(
     }
 
     // ==============================================================================
-    // TÍNH ĐỒNG HỒ MỚI (INCREMENT CHỈ CỘNG KHI NƯỚC ĐI HỢP LỆ)
+    // TÍNH ĐỒNG HỒ & THỜI HẠN NƯỚC ĐI MỚI (QUA HÀM THUẦN computeDeadlineAfterMove)
     // ==============================================================================
-    const incrementSeconds = match.time_control?.incrementSeconds ?? 5;
-    const newSeatClockMs = remainingMs + incrementSeconds * 1000;
-    const nextClock: Record<string, number> = {
-      ...(liveState.clock || {}),
-      [seatKey]: newSeatClockMs,
-    };
-
     const nextStateSerialized = engineModule.engine.serialize(nextState);
     const nextMoveIndex = expectedMoveIndex + 1;
     const nextSeat = engineModule.engine.currentPlayer(nextState);
@@ -788,8 +895,14 @@ export async function handleMoveAction(
       : moveSerialized;
 
     const nextTurnStartedAt = nowIso;
-    const nextSeatRemainingMs = nextClock[String(nextSeat)] ?? 300000;
-    const nextTurnDeadline = new Date(nowMs + nextSeatRemainingMs).toISOString();
+    const { nextClock, nextTurnDeadline } = computeDeadlineAfterMove(
+      match.time_control,
+      liveState.clock,
+      callerParticipant.seat_index,
+      nextSeat,
+      remainingMs,
+      nowMs,
+    );
 
     // ==============================================================================
     // GHI DATABASE VỚI KHÓA LẠC QUAN (OPTIMISTIC LOCKING)

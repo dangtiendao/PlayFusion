@@ -29,6 +29,12 @@ export interface MatchLiveStateDto {
   readonly clock?: Record<string, number> | null;
   readonly turnDeadline?: string | null;
   readonly serverNow?: string | null;
+  readonly timeControl?: {
+    readonly kind?: 'realtime' | 'correspondence';
+    readonly baseSeconds?: number;
+    readonly incrementSeconds?: number;
+    readonly perMoveSeconds?: number;
+  } | null;
 }
 
 export type SubmitMoveResult =
