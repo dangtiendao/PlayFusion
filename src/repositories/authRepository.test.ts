@@ -58,6 +58,53 @@ describe('Auth Repository Unit Tests (authRepository.ts - P2.1b)', () => {
       expect(result?.avatarUrl).toBe('https://lh3.googleusercontent.com/a/avatar.jpg');
       expect(result?.provider).toBe('google');
     });
+
+    it('3b. Định dạng chính xác tài khoản khách sau khi đã liên kết Google (is_anonymous=true cũ nhưng có identity Google)', () => {
+      const mockUser: User = {
+        id: 'anon-user-linked-789',
+        is_anonymous: true,
+        email: 'linked_user@gmail.com',
+        app_metadata: { provider: 'anonymous', providers: ['anonymous', 'google'] },
+        identities: [
+          {
+            id: '1',
+            identity_id: '1',
+            user_id: 'anon-user-linked-789',
+            identity_data: {},
+            provider: 'anonymous',
+            last_sign_in_at: '',
+            created_at: '',
+            updated_at: '',
+          },
+          {
+            id: '2',
+            identity_id: '2',
+            user_id: 'anon-user-linked-789',
+            identity_data: {},
+            provider: 'google',
+            last_sign_in_at: '',
+            created_at: '',
+            updated_at: '',
+          },
+        ],
+        user_metadata: {
+          full_name: 'Trần Văn B',
+          avatar_url: 'https://lh3.googleusercontent.com/a/avatar2.jpg',
+        },
+        aud: 'authenticated',
+        created_at: new Date().toISOString(),
+      };
+
+      const result = authRepo.formatAuthUser(mockUser);
+
+      expect(result).not.toBeNull();
+      expect(result?.id).toBe('anon-user-linked-789');
+      expect(result?.isAnonymous).toBe(false);
+      expect(result?.email).toBe('linked_user@gmail.com');
+      expect(result?.displayName).toBe('Trần Văn B');
+      expect(result?.avatarUrl).toBe('https://lh3.googleusercontent.com/a/avatar2.jpg');
+      expect(result?.provider).toBe('google');
+    });
   });
 
   describe('getSession & getUser', () => {

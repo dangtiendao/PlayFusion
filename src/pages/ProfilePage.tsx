@@ -40,6 +40,7 @@ export function ProfilePage() {
   const user = useAuthStore((state) => state.user);
   const profile = useAuthStore((state) => state.profile);
   const authStatus = useAuthStore((state) => state.status);
+  const authError = useAuthStore((state) => state.error);
   const updateDisplayName = useAuthStore((state) => state.updateDisplayName);
   const linkGoogle = useAuthStore((state) => state.linkGoogle);
   const authSignOut = useAuthStore((state) => state.signOut);
@@ -178,7 +179,9 @@ export function ProfilePage() {
   const handleGoogleAuth = async () => {
     setIsLinkingGoogle(true);
     try {
-      await linkGoogle();
+      await linkGoogle({
+        redirectTo: typeof window !== 'undefined' ? window.location.origin + '/profile' : undefined,
+      });
     } catch {
       // Error được quản lý trong store
     } finally {
@@ -492,6 +495,15 @@ export function ProfilePage() {
                 </p>
               </div>
             </div>
+
+            {authError && (
+              <div
+                data-testid="google-auth-error-banner"
+                className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300 font-medium"
+              >
+                ⚠️ {authError}
+              </div>
+            )}
 
             <button
               type="button"

@@ -1,4 +1,4 @@
-import type { PlayerIndex, TerminalResult } from './common';
+import type { PlayerIndex, TerminalResult } from './common.ts';
 
 /**
  * ==============================================================================

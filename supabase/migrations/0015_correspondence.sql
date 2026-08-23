@@ -179,21 +179,9 @@ BEGIN
     RAISE EXCEPTION 'ROOM_NOT_AVAILABLE' USING ERRCODE = 'P0007';
   END IF;
 
-  -- 7. CHỐNG ĐUA (ATOMIC OPTIMISTIC STATE TRANSITION)
-  -- Chỉ đúng 1 người cập nhật thành công trạng thái từ 'waiting' -> 'matched'
+  -- 7. CHỐNG ĐUA & TẠO VÁN ĐẤU TRONG BẢNG MATCHES TRƯỚC
+  -- (Phải INSERT public.matches trước để thỏa mãn foreign key constraint rooms_match_id_fkey khi UPDATE public.rooms)
   v_new_match_id := extensions.gen_random_uuid();
-
-  UPDATE public.rooms
-  SET status = 'matched',
-      match_id = v_new_match_id,
-      matched_at = now()
-  WHERE code = p_code
-    AND status = 'waiting'
-    AND expires_at > now();
-
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'ROOM_TAKEN' USING ERRCODE = 'P0008';
-  END IF;
 
   -- 8. CHIA GHẾ NGẪU NHIÊN CÔNG BẰNG (50/50 CHO HOST VÀ GUEST)
   IF random() < 0.5 THEN
@@ -204,7 +192,7 @@ BEGIN
     v_guest_seat := 0;
   END IF;
 
-  -- 9. TẠO VÁN ĐẤU TRONG BẢNG MATCHES & MATCH_PARTICIPANTS
+  -- 9. TẠO VÁN ĐẤU TRONG BẢNG MATCHES
   -- Kế thừa mode từ phòng đấu (v_room.mode) thay vì hardcode 'online_1v1'
   INSERT INTO public.matches (
     id,
@@ -222,15 +210,28 @@ BEGIN
     now()
   );
 
+  -- 10. CẬP NHẬT TRẠNG THÁI PHÒNG ĐẤU SANG 'matched'
+  -- Atomic check: Chỉ đúng 1 người cập nhật thành công (nếu thất bại do đua, transaction tự rollback xóa matches)
+  UPDATE public.rooms
+  SET status = 'matched',
+      match_id = v_new_match_id,
+      matched_at = now()
+  WHERE code = p_code
+    AND status = 'waiting'
+    AND expires_at > now();
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'ROOM_TAKEN' USING ERRCODE = 'P0008';
+  END IF;
+
+  -- 11. TẠO MATCH_PARTICIPANTS
   INSERT INTO public.match_participants (
     match_id,
     user_id,
-    seat_index,
-    is_winner,
-    score
+    seat_index
   ) VALUES
-    (v_new_match_id, v_room.host_id, v_host_seat, NULL, NULL),
-    (v_new_match_id, v_guest_id, v_guest_seat, NULL, NULL);
+    (v_new_match_id, v_room.host_id, v_host_seat),
+    (v_new_match_id, v_guest_id, v_guest_seat);
 
   RETURN QUERY SELECT v_new_match_id, v_guest_seat, v_room.game_id, v_room.mode;
 END;

@@ -383,17 +383,49 @@ export async function handleInitAction(
 
     const turnStartedAtIso = nowIso;
 
-    // 7. Ghi bản ghi vào match_live_state
-    await deps.insertLiveState({
-      match_id: matchId,
-      state_serialized: stateSerialized,
-      move_index: 0,
-      current_seat: currentSeat,
-      moves_serialized: '',
-      clock: initialClock,
-      turn_started_at: turnStartedAtIso,
-      turn_deadline: turnDeadlineIso,
-    });
+    // 7. Ghi bản ghi vào match_live_state (Kèm cơ chế chống đua Concurrent Race Condition)
+    try {
+      await deps.insertLiveState({
+        match_id: matchId,
+        state_serialized: stateSerialized,
+        move_index: 0,
+        current_seat: currentSeat,
+        moves_serialized: '',
+        clock: initialClock,
+        turn_started_at: turnStartedAtIso,
+        turn_deadline: turnDeadlineIso,
+      });
+    } catch (insertErr) {
+      // Nếu có người chơi khác vừa insert thành công ở cùng mili-giây -> Tải lại state và trả về 200 an toàn
+      const reloadedState = await deps.loadLiveState(matchId);
+      if (reloadedState) {
+        deps.log({
+          fn: 'referee',
+          action: 'init',
+          matchId,
+          userId,
+          outcome: 'already_initialized_race',
+          ms: getNow() - startTime,
+        });
+        return {
+          status: 200,
+          body: {
+            ok: true,
+            data: {
+              stateSerialized: reloadedState.state_serialized,
+              moveIndex: reloadedState.move_index,
+              currentSeat: reloadedState.current_seat,
+              movesSerialized: reloadedState.moves_serialized,
+              clock: reloadedState.clock || null,
+              turnDeadline: reloadedState.turn_deadline || null,
+              serverNow: nowIso,
+              timeControl: match.time_control || null,
+            },
+          },
+        };
+      }
+      throw insertErr;
+    }
 
     // 8. Phát sóng thông điệp match_ready qua Realtime Broadcast
     await deps.broadcast(matchId, 'match_ready', {

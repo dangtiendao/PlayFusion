@@ -11,10 +11,10 @@
  * Pure TypeScript — 100% Deterministic — Không Mutate State.
  */
 
-import type { PlayerIndex } from '../../types';
-import type { CaroState, CaroMove } from '../types';
-import { idx, xy, inBounds } from '../board';
-import { scanLineAt, scanAllLinesAt, AI_DIRECTIONS } from './patterns';
+import type { PlayerIndex } from '../../types/index.ts';
+import type { CaroState, CaroMove } from '../types.ts';
+import { idx, xy, inBounds } from '../board.ts';
+import { scanLineAt, scanAllLinesAt, AI_DIRECTIONS } from './patterns.ts';
 
 /**
  * Hệ số trọng số phòng thủ mặc định (Default Defense Weight).

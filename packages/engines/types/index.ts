@@ -7,9 +7,9 @@
  * ==============================================================================
  */
 
-export * from './common';
-export * from './errors';
-export * from './engine';
-export * from './game-definition';
-export * from './validate';
-export * from './moves-codec';
+export * from './common.ts';
+export * from './errors.ts';
+export * from './engine.ts';
+export * from './game-definition.ts';
+export * from './validate.ts';
+export * from './moves-codec.ts';

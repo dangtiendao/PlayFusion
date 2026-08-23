@@ -35,7 +35,8 @@ interface DbParticipantWithProfileRow {
   user_id: string | null;
   is_bot: boolean;
   bot_level: string | null;
-  outcome: 'win' | 'loss' | 'draw' | null;
+  result?: 'win' | 'loss' | 'draw' | null;
+  outcome?: 'win' | 'loss' | 'draw' | null;
   placement: number | null;
   score: number | null;
   rating_delta: number | null;
@@ -47,9 +48,9 @@ interface DbParticipantWithProfileRow {
 interface DbMatchRow {
   id: string;
   game_id: string;
-  game_mode: string;
+  mode?: string;
+  game_mode?: string;
   is_ranked: boolean;
-  status: string;
   started_at: string;
   ended_at: string | null;
   duration_ms: number | null;
@@ -60,7 +61,7 @@ interface DbMatchRow {
 
 interface DbParticipantJoinRow {
   match_id: string;
-  created_at: string;
+  created_at?: string;
   match: DbMatchRow | null;
 }
 
@@ -73,7 +74,7 @@ function mapParticipant(p: DbParticipantWithProfileRow): MatchParticipantSummary
     userId: p.user_id,
     isBot: p.is_bot,
     botLevel: p.bot_level,
-    result: p.outcome,
+    result: p.result ?? p.outcome ?? null,
     placement: p.placement,
     score: p.score,
     ratingDelta: p.rating_delta,
@@ -91,7 +92,7 @@ function mapDbRowToMatchSummary(row: DbMatchRow): MatchSummary {
   return {
     id: row.id,
     gameId: row.game_id,
-    mode: row.game_mode,
+    mode: row.mode ?? row.game_mode ?? '',
     isRanked: row.is_ranked,
     startedAt: row.started_at,
     endedAt: row.ended_at,
@@ -112,10 +113,14 @@ export async function getMyRecentMatches(gameId?: string, limit = 20): Promise<M
   try {
     const {
       data: { user },
-      error: userError,
+      error: authError,
     } = await supabase.auth.getUser();
 
-    if (userError || !user) {
+    if (authError) {
+      throw new Error(`Lỗi xác thực người dùng: ${authError.message}`);
+    }
+
+    if (!user) {
       return [];
     }
 
@@ -124,13 +129,11 @@ export async function getMyRecentMatches(gameId?: string, limit = 20): Promise<M
       .select(
         `
         match_id,
-        created_at,
         match:matches!inner (
           id,
           game_id,
-          game_mode,
+          mode,
           is_ranked,
-          status,
           started_at,
           ended_at,
           duration_ms,
@@ -140,7 +143,7 @@ export async function getMyRecentMatches(gameId?: string, limit = 20): Promise<M
             user_id,
             is_bot,
             bot_level,
-            outcome,
+            result,
             placement,
             score,
             rating_delta,
@@ -157,7 +160,7 @@ export async function getMyRecentMatches(gameId?: string, limit = 20): Promise<M
       query = query.eq('match.game_id', gameId);
     }
 
-    const { data, error } = await query.order('created_at', { ascending: false }).limit(limit);
+    const { data, error } = await query.limit(limit);
 
     if (error) {
       throw new Error(`Không thể tải lịch sử đấu: ${error.message}`);
@@ -176,7 +179,8 @@ export async function getMyRecentMatches(gameId?: string, limit = 20): Promise<M
       }
     }
 
-    return summaries;
+    summaries.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+    return summaries.slice(0, limit);
   } catch (err: unknown) {
     if (err instanceof Error) {
       throw err;
@@ -199,9 +203,8 @@ export async function getMatchById(id: string): Promise<MatchSummary | null> {
         `
         id,
         game_id,
-        game_mode,
+        mode,
         is_ranked,
-        status,
         started_at,
         ended_at,
         duration_ms,
@@ -211,7 +214,7 @@ export async function getMatchById(id: string): Promise<MatchSummary | null> {
           user_id,
           is_bot,
           bot_level,
-          outcome,
+          result,
           placement,
           score,
           rating_delta,

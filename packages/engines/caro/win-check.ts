@@ -1,6 +1,6 @@
-import type { PlayerIndex } from '../types';
-import type { CaroOptions } from './types';
-import { idx, xy, inBounds } from './board';
+import type { PlayerIndex } from '../types/index.ts';
+import type { CaroOptions } from './types.ts';
+import { idx, xy, inBounds } from './board.ts';
 
 /**
  * ==============================================================================

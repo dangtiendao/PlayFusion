@@ -1,5 +1,5 @@
-import type { GameMode, ScoringType, RatingSystem, AiLevel } from './common';
-import type { Engine } from './engine';
+import type { GameMode, ScoringType, RatingSystem, AiLevel } from './common.ts';
+import type { Engine } from './engine.ts';
 
 /**
  * ==============================================================================

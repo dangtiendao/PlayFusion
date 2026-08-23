@@ -18,8 +18,8 @@
  * ==============================================================================
  */
 
-import { EngineError, type MovesCodec } from '../types';
-import type { CaroMove } from './types';
+import { EngineError, type MovesCodec } from '../types/index.ts';
+import type { CaroMove } from './types.ts';
 
 export class CaroMovesCodec implements MovesCodec<CaroMove> {
   /**

@@ -4,9 +4,9 @@
  * ==============================================================================
  */
 
-export * from './patterns';
-export * from './evaluate';
-export * from './candidates';
-export * from './random';
-export * from './levels';
-export * from './search';
+export * from './patterns.ts';
+export * from './evaluate.ts';
+export * from './candidates.ts';
+export * from './random.ts';
+export * from './levels.ts';
+export * from './search.ts';

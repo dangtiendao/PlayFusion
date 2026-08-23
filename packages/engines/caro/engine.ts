@@ -1,8 +1,8 @@
-import type { Engine, EngineInitConfig, PlayerIndex, TerminalResult } from '../types';
-import { EngineError } from '../types';
-import type { CaroMove, CaroOptions, CaroState } from './types';
-import { DEFAULT_CARO_OPTIONS } from './types';
-import { checkWinAt, checkWinFullScan } from './win-check';
+import type { Engine, EngineInitConfig, PlayerIndex, TerminalResult } from '../types/index.ts';
+import { EngineError } from '../types/index.ts';
+import type { CaroMove, CaroOptions, CaroState } from './types.ts';
+import { DEFAULT_CARO_OPTIONS } from './types.ts';
+import { checkWinAt, checkWinFullScan } from './win-check.ts';
 
 /**
  * ==============================================================================

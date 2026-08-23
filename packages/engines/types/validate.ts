@@ -1,4 +1,4 @@
-import type { GameDefinition } from './game-definition';
+import type { GameDefinition } from './game-definition.ts';
 
 /**
  * ==============================================================================
