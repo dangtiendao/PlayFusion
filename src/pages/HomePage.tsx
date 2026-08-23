@@ -4,6 +4,7 @@ import { getAllGames } from '@/games/registry';
 import { GameCard } from '@/components/games/GameCard';
 import { getCategoryConfig } from '@/games/labels';
 import { removeVietnameseTones } from '@/core/text';
+import { ActiveMatchBanner } from '@/components/ActiveMatchBanner';
 import type { GameCategory } from '@engines/types';
 
 /**
@@ -74,6 +75,9 @@ export function HomePage() {
 
   return (
     <div className="space-y-5 pb-6">
+      {/* BANNER TRẬN ĐẤU DỞ DANG (P3.5b) */}
+      <ActiveMatchBanner />
+
       {/* 1. THANH TÌM KIẾM TRÒ CHƠI */}
       <div className="relative">
         <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">

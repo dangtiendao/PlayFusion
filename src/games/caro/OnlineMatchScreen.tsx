@@ -3,18 +3,25 @@
  * CARO ONLINE MATCH SCREEN (SRC/GAMES/CARO/ONLINEMATCHSCREEN.TSX)
  * ==============================================================================
  *
- * MÀN HÌNH VÁN ĐẤU CARO ONLINE 1V1 HOÀN CHỈNH (PHASE P3.3C & P3.4C)
+ * MÀN HÌNH VÁN ĐẤU CARO ONLINE 1V1 HOÀN CHỈNH (PHASE P3.3, P3.4 & P3.5)
  *
  * NGUYÊN TẮC BẤT BIẾN:
  * 1. SERVER LÀ NGUỒN CHÂN LÝ DUY NHẤT (SERVER-DRIVEN CLOCK & STATE):
  *    - Toàn bộ thay đổi thế cờ và phán quyết thời gian đến từ Server.
  *    - Client TUYỆT ĐỐI KHÔNG áp dụng Optimistic move và KHÔNG tự phán thắng/thua khi giờ về 0.
- * 2. BÙ LỆCH GIỜ & AUTO-CLAIM (P3.4c):
- *    - Tính `clockOffset` mỗi khi nhận `serverNow`.
- *    - Tự động gọi `claimTimeout` khi đối thủ quá hạn (Grace 2s + 1s đệm = -3000ms).
- * 3. ĐẦU HÀNG & HỦY VÁN THEO NGƯỠNG (THRESHOLD ABORT / RESIGN):
- *    - Trước nước 3: Nhãn "Hủy ván" (kết thúc abort, không tính kết quả).
- *    - Từ nước 3: Nhãn "Đầu hàng" (kết thúc resign, người thoát/hàng bị xử thua).
+ * 2. PIPELINE RESYNC THỐNG NHẤT (P3.5b):
+ *    - Gom toàn bộ các điểm kéo dữ liệu về `resyncFromServer()` duy nhất.
+ *    - THAY TOÀN BỘ State local bằng server state khi có live_state, không merge từng phần.
+ *    - Khôi phục kết quả trận đấu từ `matches` nếu trận đã kết thúc trong lúc offline (Đường b).
+ *    - Reset cờ auto-claim `hasClaimedRef = false` theo deadline mới.
+ * 3. AUTO-RECONNECT VỚI ĐỒNG HỒ TRUNG THỰC (P3.5a):
+ *    - Khi rớt mạng (status 'reconnecting'): Bàn cờ bị khóa, đồng hồ VẪN CHẠY TIẾP theo dữ liệu server.
+ *    - Nối lại thành công -> tự động kích hoạt `resyncFromServer()`.
+ * 4. THEO DÕI PRESENCE ĐỐI THỦ VỚI DEBOUNCE 5S (P3.5c):
+ *    - Debounce 5s trước khi chuyển sang trạng thái 'away' để tránh nhấp nháy khi mạng chập chờn.
+ *    - Khi đối thủ away: Hiện badge cảnh báo và đếm ngược thời gian hết giờ nếu là lượt của họ.
+ *    - THÔNG TIN HIỂN THỊ THUẦN TÚY: Presence KHÔNG BAO GIỜ là căn cứ xử thua, auto-claim P3.4 lo phán quyết.
+ *    - Lượt của mình khi đối thủ away: Vẫn đánh bình thường, không khóa gì cả.
  * ==============================================================================
  */
 
@@ -29,11 +36,15 @@ import { caroEngine, DEFAULT_CARO_OPTIONS, checkWinAt, type CaroState } from '@e
 import { InteractiveBoard, MatchEndOverlay } from './components';
 import { MatchClock } from './components/MatchClock';
 import { useMatchChannel, type PresenceMember } from '@/transport';
+import { useTransportReconnectAttempt } from '@/stores/transportStore';
 import { refereeRepository } from '@/repositories/refereeRepository';
 import { matchRepository } from '@/repositories/matchRepository';
 import { useAuthStore } from '@/stores/authStore';
-import { computeOffset, calculateRemainingMs } from '@/core/serverClock';
+import { computeOffset, calculateRemainingMs, formatMmSs } from '@/core/serverClock';
 import { hapticTap } from '@/core/haptics';
+
+/** Thời gian debounce (5 giây) trước khi kết luận đối thủ đã rời presence (P3.5c) */
+const OPPONENT_AWAY_DEBOUNCE_MS = 5000;
 
 export interface OnlineMatchScreenProps {
   /** ID ván đấu (UUID) */
@@ -55,6 +66,7 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
 
   const user = useAuthStore((s) => s.user);
   const profile = useAuthStore((s) => s.profile);
+  const reconnectAttempt = useTransportReconnectAttempt();
 
   // 1. STATE MÁY TRẠNG THÁI VÁN ĐẤU
   const [loading, setLoading] = useState(true);
@@ -90,6 +102,13 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
   // Thông tin đối thủ & Toast đồng bộ
   const [opponentName, setOpponentName] = useState<string>('Đối thủ');
   const [resyncToast, setResyncToast] = useState<string | null>(null);
+  const [isResyncing, setIsResyncing] = useState(false);
+  const [resyncError, setResyncError] = useState<string | null>(null);
+
+  // Presence Đối thủ & Trạng thái Away Debounce (P3.5c)
+  const [isOpponentAway, setIsOpponentAway] = useState(false);
+  const [hasEverSeenOpponent, setHasEverSeenOpponent] = useState(false);
+  const awayTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Dialog Đầu Hàng / Hủy ván / Thoát trận
   const [showResignDialog, setShowResignDialog] = useState(false);
@@ -113,7 +132,86 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
     };
   }, [user?.id, user?.isAnonymous, profile?.displayName]);
 
-  // 2. KHỞI TẠO VÁN ĐẤU (INIT MATCH IDEMPOTENT)
+  // ==============================================================================
+  // 2. PIPELINE RESYNC THỐNG NHẤT (P3.5b)
+  // ==============================================================================
+  const resyncFromServer = useCallback(
+    async (retryCount = 0) => {
+      if (!matchId || isGameOver) return;
+
+      setIsResyncing(true);
+      setResyncError(null);
+
+      try {
+        const liveState = await matchRepository.getLiveState(matchId);
+
+        // ------------------------------------------------------------------------
+        // ĐƯỜNG A: TRẬN ĐẤU ĐANG SỐNG (liveState !== null)
+        // THAY TOÀN BỘ LOCAL STATE BẰNG SERVER STATE (KHÔNG MERGE TỪNG PHẦN)
+        // ------------------------------------------------------------------------
+        if (liveState) {
+          const nextBoardState = caroEngine.deserialize(liveState.stateSerialized);
+          setGameState(nextBoardState);
+          setMoveIndex(liveState.moveIndex);
+          setCurrentSeat(liveState.currentSeat);
+          if (liveState.clock) setClock(liveState.clock);
+          if (liveState.turnDeadline) setTurnDeadline(liveState.turnDeadline);
+
+          // RESET CỜ AUTO-CLAIM THEO DEADLINE MỚI (CHỐNG CLAIM DỰA TRÊN DỮ LIỆU CŨ)
+          hasClaimedRef.current = false;
+
+          // Cập nhật ô cờ cuối từ movesSerialized nếu có
+          if (liveState.movesSerialized) {
+            const moves = liveState.movesSerialized.split(',').map(Number);
+            if (moves.length > 0) {
+              const lastCell = moves[moves.length - 1];
+              if (typeof lastCell === 'number' && !isNaN(lastCell)) {
+                setLastMoveCell(lastCell);
+              }
+            }
+          }
+
+          setResyncToast('Đã đồng bộ lại thế cờ với máy chủ');
+          setTimeout(() => setResyncToast(null), 3000);
+          setIsResyncing(false);
+          return;
+        }
+
+        // ------------------------------------------------------------------------
+        // ĐƯỜNG B: TRẬN ĐÃ KẾT THÚC TRONG LÚC OFFLINE (liveState === null)
+        // LÝ DO PHẢI ĐI QUA matches: ĐỐI THỦ ĐÃ CLAIM TIMEOUT HOẶC RESIGN XONG
+        // ------------------------------------------------------------------------
+        const matchDetail = await matchRepository.getMatchById(matchId);
+        if (matchDetail && matchDetail.endedAt) {
+          setIsGameOver(true);
+          setEndReason(matchDetail.endReason || 'normal');
+
+          const winnerPart = matchDetail.participants.find((p) => p.result === 'win');
+          setWinnerSeat(winnerPart ? winnerPart.seatIndex : null);
+          setIsResyncing(false);
+          return;
+        }
+
+        // Không tìm thấy match hoặc ván bị hủy bất thường
+        setInitError('Ván đấu không tồn tại hoặc đã bị hủy.');
+        setIsResyncing(false);
+      } catch (err: unknown) {
+        // RETRY TỐI ĐA 3 LẦN CHO LỖI MẠNG RETRYABLE (CÁCH NHAU 2S)
+        if (retryCount < 3) {
+          setTimeout(() => {
+            void resyncFromServer(retryCount + 1);
+          }, 2000);
+        } else {
+          setIsResyncing(false);
+          const msg = (err as Error)?.message || 'Lỗi kết nối khi đồng bộ dữ liệu.';
+          setResyncError(msg);
+        }
+      }
+    },
+    [matchId, isGameOver],
+  );
+
+  // 3. KHỞI TẠO VÁN ĐẤU (INIT MATCH IDEMPOTENT)
   const initOnlineMatch = useCallback(async () => {
     if (!matchId) {
       setInitError('Không tìm thấy mã ván đấu.');
@@ -166,7 +264,7 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
     void initOnlineMatch();
   }, [initOnlineMatch]);
 
-  // 3. XỬ LÝ NHẬN BROADCAST REALTIME TỪ MÁY CHỦ
+  // 4. XỬ LÝ NHẬN BROADCAST REALTIME TỪ MÁY CHỦ
   const handleRealtimeMessage = useCallback(
     async (env: { type: string; payload: unknown }) => {
       // ------------------------------------------------------------------------
@@ -237,23 +335,8 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
           return;
         }
 
-        // TH 3: LỆCH NHỊP / MISS BROADCAST (p.moveIndex > currentLocalIndex + 1)
-        try {
-          const freshState = await matchRepository.getLiveState(matchId);
-          if (freshState) {
-            setGameState(caroEngine.deserialize(freshState.stateSerialized));
-            setMoveIndex(freshState.moveIndex);
-            setCurrentSeat(freshState.currentSeat);
-            if (freshState.clock) setClock(freshState.clock);
-            if (freshState.turnDeadline) setTurnDeadline(freshState.turnDeadline);
-            hasClaimedRef.current = false;
-
-            setResyncToast('Đã đồng bộ lại thế cờ mới nhất với máy chủ');
-            setTimeout(() => setResyncToast(null), 3000);
-          }
-        } catch {
-          // Bỏ qua lỗi resync mạng tạm thời
-        }
+        // TH 3: LỆCH NHỊP / MISS BROADCAST (p.moveIndex > currentLocalIndex + 1) -> GỌI RESYNC THỐNG NHẤT
+        void resyncFromServer();
         return;
       }
 
@@ -281,10 +364,10 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
         }
       }
     },
-    [matchId],
+    [resyncFromServer],
   );
 
-  // 4. KẾT NỐI REALTIME TRANSPORT QUA USEMATCHCHANNEL
+  // 5. KẾT NỐI REALTIME TRANSPORT QUA USEMATCHCHANNEL (P3.5a ĐẤU NỐI ONRECONNECTED)
   const {
     status: transportStatus,
     members,
@@ -294,9 +377,51 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
     self: selfMember,
     enabled: !loading && !isGameOver,
     onMessage: handleRealtimeMessage,
+    onReconnected: () => {
+      setResyncToast('Đã kết nối lại máy chủ');
+      setTimeout(() => setResyncToast(null), 2500);
+      void resyncFromServer();
+    },
   });
 
-  // 5. AUTO-CLAIM TIMEOUT KHI ĐỐI THỦ QUÁ HẠN (P3.4c)
+  // 6. THEO DÕI PRESENCE ĐỐI THỦ VỚI DEBOUNCE 5 GIÂY (P3.5c)
+  useEffect(() => {
+    const isOpponentInPresence = members.some((m) => m.userId !== user?.id);
+
+    if (isOpponentInPresence) {
+      // Đối thủ đang hiện diện trong kênh
+      if (awayTimerRef.current) {
+        clearTimeout(awayTimerRef.current);
+        awayTimerRef.current = null;
+      }
+
+      if (isOpponentAway) {
+        // Vừa quay lại sau khi away
+        setResyncToast('Đối thủ đã kết nối lại');
+        setTimeout(() => setResyncToast(null), 3000);
+      }
+
+      setIsOpponentAway(false);
+      setHasEverSeenOpponent(true);
+    } else {
+      // Đối thủ không có trong members (có thể rớt mạng hoặc đang auto-reconnect)
+      if (hasEverSeenOpponent && !awayTimerRef.current && !isOpponentAway) {
+        awayTimerRef.current = setTimeout(() => {
+          awayTimerRef.current = null;
+          setIsOpponentAway(true);
+        }, OPPONENT_AWAY_DEBOUNCE_MS);
+      }
+    }
+
+    return () => {
+      if (awayTimerRef.current) {
+        clearTimeout(awayTimerRef.current);
+        awayTimerRef.current = null;
+      }
+    };
+  }, [members, user?.id, hasEverSeenOpponent, isOpponentAway]);
+
+  // 7. AUTO-CLAIM TIMEOUT KHI ĐỐI THỦ QUÁ HẠN (P3.4c - GIỮ NGUYÊN)
   // Grace period 2s phía server + 1s đệm client = -3000ms
   useEffect(() => {
     if (isGameOver || loading || currentSeat === mySeat || !turnDeadline) return;
@@ -327,10 +452,16 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
     return () => clearInterval(interval);
   }, [isGameOver, loading, currentSeat, mySeat, turnDeadline, clockOffset, matchId]);
 
-  // 6. GỬI NƯỚC ĐI LÊN TRỌNG TÀI SERVER (SUBMIT MOVE)
+  // 8. GỬI NƯỚC ĐI LÊN TRỌNG TÀI SERVER (SUBMIT MOVE)
   const handleMoveConfirmed = useCallback(
     async (cellIndex: number) => {
-      if (currentSeat !== mySeat || isSubmitting || isGameOver || transportStatus !== 'connected') {
+      if (
+        currentSeat !== mySeat ||
+        isSubmitting ||
+        isGameOver ||
+        transportStatus === 'failed' ||
+        isResyncing
+      ) {
         return;
       }
 
@@ -353,19 +484,7 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
 
         if (res.kind === 'duplicate' || res.kind === 'stale') {
           setIsSubmitting(false);
-          if (res.stateSerialized) {
-            setGameState(caroEngine.deserialize(res.stateSerialized));
-            if (res.moveIndex !== undefined) setMoveIndex(res.moveIndex);
-            if ('currentSeat' in res && typeof res.currentSeat === 'number') {
-              setCurrentSeat(res.currentSeat);
-            }
-            if ('clock' in res && res.clock) setClock(res.clock);
-            if ('turnDeadline' in res && res.turnDeadline) setTurnDeadline(res.turnDeadline);
-            if ('serverNow' in res && res.serverNow) setClockOffset(computeOffset(res.serverNow));
-
-            setResyncToast('Đã đồng bộ lại thế cờ với máy chủ');
-            setTimeout(() => setResyncToast(null), 3000);
-          }
+          void resyncFromServer();
           return;
         }
 
@@ -398,7 +517,17 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
         });
       }
     },
-    [currentSeat, mySeat, isSubmitting, isGameOver, transportStatus, moveIndex, matchId],
+    [
+      currentSeat,
+      mySeat,
+      isSubmitting,
+      isGameOver,
+      transportStatus,
+      isResyncing,
+      moveIndex,
+      matchId,
+      resyncFromServer,
+    ],
   );
 
   // Xử lý gửi lại nước đi khi gặp lỗi mạng RETRYABLE
@@ -414,13 +543,7 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
       setSubmitError(null);
 
       if (res.kind === 'duplicate' || res.kind === 'stale') {
-        if (res.stateSerialized) {
-          setGameState(caroEngine.deserialize(res.stateSerialized));
-          if (res.moveIndex !== undefined) setMoveIndex(res.moveIndex);
-          if ('currentSeat' in res && typeof res.currentSeat === 'number') {
-            setCurrentSeat(res.currentSeat);
-          }
-        }
+        void resyncFromServer();
       }
     } catch (err: unknown) {
       setIsSubmitting(false);
@@ -429,28 +552,9 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
         prev ? { ...prev, message: repoErr.message || 'Gửi lại thất bại. Thử lại.' } : null,
       );
     }
-  }, [submitError, isSubmitting, matchId]);
+  }, [submitError, isSubmitting, matchId, resyncFromServer]);
 
-  // Xử lý kết nối lại thủ công khi mất mạng
-  const handleReconnect = useCallback(async () => {
-    try {
-      await reconnect();
-      const freshState = await matchRepository.getLiveState(matchId);
-      if (freshState) {
-        setGameState(caroEngine.deserialize(freshState.stateSerialized));
-        setMoveIndex(freshState.moveIndex);
-        setCurrentSeat(freshState.currentSeat);
-        if (freshState.clock) setClock(freshState.clock);
-        if (freshState.turnDeadline) setTurnDeadline(freshState.turnDeadline);
-        setResyncToast('Đã kết nối lại và đồng bộ thế cờ thành công');
-        setTimeout(() => setResyncToast(null), 3000);
-      }
-    } catch {
-      // Bỏ qua lỗi
-    }
-  }, [reconnect, matchId]);
-
-  // 7. XỬ LÝ ĐẦU HÀNG / HỦY VÁN
+  // 9. XỬ LÝ ĐẦU HÀNG / HỦY VÁN
   const handleResign = useCallback(async () => {
     try {
       setShowResignDialog(false);
@@ -467,7 +571,7 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
     }
   }, [matchId, mySeat]);
 
-  // 8. XỬ LÝ THOÁT KHỎI GAMESHELL AN TOÀN
+  // 10. XỬ LÝ THOÁT KHỎI GAMESHELL AN TOÀN
   const handleExitRequest = useCallback(() => {
     if (isGameOver) {
       navigate('/');
@@ -487,13 +591,14 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
   }, [matchId, navigate]);
 
   // Xác định trạng thái lượt & Khóa bàn cờ
+  // [LƯU Ý P3.5c]: Lượt của mình khi đối thủ away VẪN ĐƯỢC ĐÁNH BÌNH THƯỜNG (không khóa bàn cờ của mình)
   const isMyTurn =
-    currentSeat === mySeat && !isGameOver && !isSubmitting && transportStatus === 'connected';
-  const isBoardDisabled = !isMyTurn || isSubmitting || isGameOver;
-
-  const isOpponentOnline = useMemo(() => {
-    return members.some((m) => m.userId !== user?.id);
-  }, [members, user?.id]);
+    currentSeat === mySeat &&
+    !isGameOver &&
+    !isSubmitting &&
+    !isResyncing &&
+    transportStatus !== 'failed';
+  const isBoardDisabled = !isMyTurn || isSubmitting || isGameOver || isResyncing;
 
   const matchReport: MatchResultReport = useMemo(
     () => ({
@@ -553,7 +658,7 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
         data-testid="caro-online-match-screen"
         className="relative flex flex-col items-center justify-between w-full max-w-lg mx-auto min-h-[560px] p-2 sm:p-4 select-none"
       >
-        {/* Toast thông báo Resync */}
+        {/* Toast thông báo Resync & Kết nối lại */}
         {resyncToast && (
           <div
             data-testid="resync-toast"
@@ -588,15 +693,43 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
             )}
 
             <div className="flex items-center gap-1.5">
-              <span
-                data-testid="opponent-presence-dot"
-                className={`w-2 h-2 rounded-full ${isOpponentOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-500'}`}
-              />
+              {isOpponentAway ? (
+                <span
+                  data-testid="opponent-away-badge"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold animate-pulse"
+                >
+                  <span>📶❌</span>
+                  <span>Mất kết nối</span>
+                </span>
+              ) : (
+                <span
+                  data-testid="opponent-presence-dot"
+                  className={`w-2 h-2 rounded-full ${hasEverSeenOpponent ? 'bg-emerald-500 animate-pulse' : 'bg-slate-500'}`}
+                />
+              )}
               <span className="font-medium text-slate-300 truncate max-w-[90px]">
                 {opponentName}
               </span>
             </div>
           </div>
+
+          {/* Dòng phụ cảnh báo đối thủ mất kết nối & Đếm ngược hết giờ (P3.5c) */}
+          {isOpponentAway && !isGameOver && currentSeat !== mySeat && turnDeadline && (
+            <div
+              data-testid="opponent-away-subtext"
+              className="w-full px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] font-medium flex items-center justify-between animate-fade-in"
+            >
+              <div className="flex items-center gap-1.5 truncate">
+                <span>⏳</span>
+                <span className="truncate">
+                  Đối thủ đang mất kết nối. Nếu không quay lại, bạn sẽ tự thắng khi hết giờ:
+                </span>
+              </div>
+              <span className="font-mono font-bold flex-shrink-0 text-amber-200">
+                {formatMmSs(Math.max(0, calculateRemainingMs(turnDeadline, clockOffset)))}
+              </span>
+            </div>
+          )}
 
           {/* ĐỒNG HỒ VÁN CỜ TRỰC TUYẾN (P3.4c) */}
           <MatchClock
@@ -610,24 +743,59 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
             onHapticTick={() => hapticTap()}
           />
 
-          {/* Banner trạng thái mạng MẤT KẾT NỐI */}
-          {transportStatus === 'error' && (
+          {/* Banner trạng thái MẤT KẾT NỐI — ĐANG TỰ ĐỘNG NỐI LẠI (P3.5a & P3.5b) */}
+          {transportStatus === 'reconnecting' && (
             <div
-              data-testid="transport-error-banner"
+              data-testid="transport-reconnecting-banner"
+              className="w-full p-2.5 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-700 dark:text-amber-300 text-xs font-bold flex items-center gap-2 animate-pulse"
+            >
+              <span className="animate-spin">🔄</span>
+              <span>Mất kết nối — đang kết nối lại (lần {reconnectAttempt})...</span>
+            </div>
+          )}
+
+          {/* Banner trạng thái KHÔNG THỂ KẾT NỐI LẠI (FAILED) HOẶC LỖI RESYNC (P3.5b) */}
+          {(transportStatus === 'failed' || resyncError) && (
+            <div
+              data-testid="transport-failed-banner"
               className="w-full p-2.5 rounded-2xl bg-rose-500/20 border border-rose-500/40 text-rose-600 dark:text-rose-400 text-xs font-bold flex items-center justify-between animate-shake"
             >
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 truncate max-w-[200px]">
                 <span>⚠️</span>
-                <span>Mất kết nối máy chủ</span>
+                <span className="truncate">{resyncError || 'Không thể kết nối lại máy chủ'}</span>
               </div>
-              <button
-                type="button"
-                data-testid="reconnect-btn"
-                onClick={handleReconnect}
-                className="px-3 py-1 rounded-xl bg-rose-600 text-white text-xs font-bold active:scale-95 transition-all"
-              >
-                Kết nối lại
-              </button>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <button
+                  type="button"
+                  data-testid="manual-retry-btn"
+                  onClick={() => {
+                    setResyncError(null);
+                    void reconnect();
+                    void resyncFromServer();
+                  }}
+                  className="px-2.5 py-1 rounded-xl bg-rose-600 text-white text-xs font-bold active:scale-95 transition-all cursor-pointer"
+                >
+                  Thử lại
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate('/')}
+                  className="px-2.5 py-1 rounded-xl bg-slate-800 text-slate-200 text-xs font-bold active:scale-95 transition-all cursor-pointer"
+                >
+                  Về sảnh
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Banner Đang Đồng Bộ Dữ Liệu */}
+          {isResyncing && (
+            <div
+              data-testid="resyncing-banner"
+              className="w-full p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-xs font-medium flex items-center justify-center gap-2"
+            >
+              <span className="animate-spin">⏳</span>
+              <span>Đang đồng bộ dữ liệu ván đấu từ máy chủ...</span>
             </div>
           )}
 
@@ -676,9 +844,11 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
                 <span className="text-xs font-bold leading-tight">
                   {isSubmitting
                     ? 'Đang xác nhận nước đi...'
-                    : isMyTurn
-                      ? 'Lượt của bạn!'
-                      : `${opponentName} đang suy nghĩ...`}
+                    : isResyncing
+                      ? 'Đang đồng bộ...'
+                      : isMyTurn
+                        ? 'Lượt của bạn!'
+                        : `${opponentName} đang suy nghĩ...`}
                 </span>
                 <span className="text-[10px] opacity-75 font-mono">Nước #{moveIndex + 1}</span>
               </div>
@@ -698,7 +868,7 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
                   type="button"
                   data-testid="resign-btn"
                   onClick={() => setShowResignDialog(true)}
-                  className="px-2.5 py-1 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-[11px] font-bold border border-slate-700 active:scale-95 transition-all"
+                  className="px-2.5 py-1 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-[11px] font-bold border border-slate-700 active:scale-95 transition-all cursor-pointer"
                 >
                   {moveIndex < 3 ? 'Hủy ván' : 'Đầu hàng'}
                 </button>

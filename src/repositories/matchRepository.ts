@@ -378,9 +378,49 @@ export async function getLiveState(matchId: string): Promise<MatchLiveStateSumma
   }
 }
 
+export interface ActiveMatchInfo {
+  readonly matchId: string;
+  readonly gameId: string;
+}
+
+/**
+ * Lấy thông tin ván đấu online đang diễn ra của người chơi hiện tại (nếu có).
+ * Dùng để hiển thị banner khôi phục ván đấu khi mở lại app hoặc chuyển sang visible.
+ */
+export async function getMyActiveMatch(): Promise<ActiveMatchInfo | null> {
+  try {
+    const userRes = await supabase.auth.getUser();
+    const userId = userRes.data.user?.id;
+    if (!userId) return null;
+
+    const { data, error } = await supabase
+      .from('match_participants')
+      .select('match_id, matches!inner(id, game_id, ended_at, mode)')
+      .eq('user_id', userId)
+      .is('matches.ended_at', null)
+      .eq('matches.mode', 'online_1v1')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !data || !data.matches) return null;
+
+    const matchData = Array.isArray(data.matches) ? data.matches[0] : data.matches;
+    if (!matchData || !matchData.id || !matchData.game_id) return null;
+
+    return {
+      matchId: matchData.id,
+      gameId: matchData.game_id,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export const matchRepository = {
   getMyRecentMatches,
   getMatchById,
   recordOfflineMatch,
   getLiveState,
+  getMyActiveMatch,
 };

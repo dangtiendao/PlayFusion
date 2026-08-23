@@ -314,4 +314,54 @@ describe('Match Repository Unit Tests (matchRepository.ts - P2.5a)', () => {
       expect(result).toBeNull();
     });
   });
+
+  describe('getMyActiveMatch (P3.5b)', () => {
+    it('12. Tìm thấy ván đấu đang diễn ra của người dùng', async () => {
+      vi.spyOn(supabase.auth, 'getUser').mockResolvedValue({
+        data: { user: { id: 'usr-123' } as unknown as import('@supabase/supabase-js').User },
+        error: null,
+      });
+
+      const mockLimit = vi.fn().mockReturnValue({
+        maybeSingle: vi.fn().mockResolvedValue({
+          data: {
+            match_id: 'match-live-uuid',
+            matches: {
+              id: 'match-live-uuid',
+              game_id: 'caro',
+              ended_at: null,
+              mode: 'online_1v1',
+            },
+          },
+          error: null,
+        }),
+      });
+
+      const mockOrder = vi.fn().mockReturnValue({ limit: mockLimit });
+      const mockEqMode = vi.fn().mockReturnValue({ order: mockOrder });
+      const mockIsEndedAt = vi.fn().mockReturnValue({ eq: mockEqMode });
+      const mockEqUserId = vi.fn().mockReturnValue({ is: mockIsEndedAt });
+      const mockSelect = vi.fn().mockReturnValue({ eq: mockEqUserId });
+
+      vi.spyOn(supabase, 'from').mockReturnValue({
+        select: mockSelect,
+      } as unknown as ReturnType<typeof supabase.from>);
+
+      const activeMatch = await matchRepo.getMyActiveMatch();
+      expect(activeMatch).toEqual({
+        matchId: 'match-live-uuid',
+        gameId: 'caro',
+      });
+    });
+
+    it('13. Trả về null khi không có ván đấu nào đang sống hoặc chưa đăng nhập', async () => {
+      vi.spyOn(supabase.auth, 'getUser').mockResolvedValue({
+        data: { user: null as unknown as import('@supabase/supabase-js').User },
+        error: null,
+      });
+
+      const activeMatch = await matchRepo.getMyActiveMatch();
+      expect(activeMatch).toBeNull();
+    });
+  });
 });

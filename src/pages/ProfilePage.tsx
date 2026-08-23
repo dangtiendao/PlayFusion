@@ -13,6 +13,7 @@ import type { PlayerGameStats, MatchSummary } from '@/repositories/types';
 import { StatsSummary } from '@/components/stats/StatsSummary';
 import { GameStatCard } from '@/components/stats/GameStatCard';
 import { MatchHistoryList } from '@/components/stats/MatchHistoryList';
+import { ActiveMatchBanner } from '@/components/ActiveMatchBanner';
 
 /**
  * ==============================================================================
@@ -205,6 +206,9 @@ export function ProfilePage() {
 
   return (
     <div className="space-y-6 max-w-lg mx-auto pb-8">
+      {/* BANNER TRẬN ĐẤU DỞ DANG (P3.5b) */}
+      <ActiveMatchBanner />
+
       {/* 1. TIÊU ĐỀ TRANG */}
       <section className="text-center space-y-2">
         <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-primary-50 text-primary-700 dark:bg-primary-950/60 dark:text-primary-300 border border-primary-200 dark:border-primary-800">

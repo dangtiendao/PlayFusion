@@ -17,16 +17,17 @@
  *      đúng 1 kết nối duy nhất sống sót.
  * 4. ĐỔI TRẬN ĐẤU TUẦN TỰ (CASE C):
  *    - Khi `matchId` thay đổi, kênh cũ bị disconnect TRƯỚC, sau đó kênh mới mới được connect.
- * 5. TRÁNH RECONNECT VÌ ONMESSAGE THAY ĐỔI THAM CHIẾU (CASE D):
- *    - `onMessage` callback được lưu giữ qua `useRef`, không đưa vào dependency array của
- *      `useEffect`, ngăn chặn triệt để bug reconnect thừa thãi mỗi khi parent re-render.
- * 6. CHÍNH SÁCH MOBILE & QUOTA WATCHDOG:
- *    - `visibilitychange`: Giữ nguyên kết nối khi tab chuyển sang hidden (game đối kháng theo lượt).
- *    - `offline`: Chuyển trạng thái sang 'error' kèm lỗi 'offline', cung cấp `reconnect()` thủ công.
- *    - Watchdog DEV-only: Báo động `console.error` nếu phát hiện >1 hook active trong 1 tab.
- * 7. RANH GIỚI PHÂN TẦNG:
- *    - Hook nhận `enabled` từ caller, tuyệt đối KHÔNG import trực tiếp `gameSessionStore`
- *      hay các store của game, bảo toàn luật phụ thuộc 1 chiều.
+ * 5. TRÁNH RECONNECT VÌ ONMESSAGE/ONRECONNECTED THAY ĐỔI THAM CHIẾU (CASE D):
+ *    - `onMessage` và `onReconnected` callback được lưu giữ qua `useRef`, không đưa vào
+ *      dependency array của `useEffect`, ngăn chặn triệt để bug reconnect thừa thãi.
+ * 6. CƠ CHẾ AUTO-RECONNECT VỚI BACKOFF LŨY TIẾN & CỬA SỔ BỎ CUỘC (P3.5a):
+ *    - Tự động kích hoạt khi rớt mạng, lỗi TIMED_OUT/CHANNEL_ERROR, hoặc sự kiện offline.
+ *    - Backoff lũy tiến: lần 0 (ngay lập tức) -> 1s -> 2s -> 4s -> 8s -> tối đa 10s.
+ *    - Jitter ±20% chống thundering herd khi có sự cố mạng diện rộng.
+ *    - Cửa sổ bỏ cuộc đếm từ lần rớt đầu tiên đọc từ `system_config` (mặc định 60s fallback).
+ *    - Kỷ luật dừng: enabled=false / unmount / matchId đổi -> hủy sạch timer đang chờ.
+ * 7. CHÍNH SÁCH MOBILE:
+ *    - `visibilitychange`: Khi chuyển tab sang visible -> thử kết nối lại ngay lập tức.
  * ==============================================================================
  */
 
@@ -40,12 +41,32 @@ import type {
 } from './types';
 import { useTransportStore, useTransportStatus, useChannelMembers } from '@/stores/transportStore';
 import { RepoError } from '@/repositories/types';
+import { configRepository } from '@/repositories/configRepository';
 
 /**
  * Biến đếm toàn cục cấp module dùng để giám sát số lượng hook `useMatchChannel`
  * đang kích hoạt đồng thời trong một tab trình duyệt (Chỉ hoạt động ở môi trường DEV).
  */
 let devActiveHookCount = 0;
+
+/**
+ * Tính toán độ trễ backoff lũy tiến kèm Jitter ±20%.
+ * - Lần 0: 0ms (thử lại ngay lập tức)
+ * - Lần 1: 1000ms ± 20% (800ms - 1200ms)
+ * - Lần 2: 2000ms ± 20% (1600ms - 2400ms)
+ * - Lần 3: 4000ms ± 20% (3200ms - 4800ms)
+ * - Lần 4: 8000ms ± 20% (6400ms - 9600ms)
+ * - Lần 5+: 10000ms ± 20% (8000ms - 12000ms, cap tối đa 10s)
+ *
+ * Jitter ±20% giúp chống nghẽn sóng thundering herd khi nhiều client cùng rớt mạng.
+ */
+export function calculateBackoffDelayMs(attempt: number): number {
+  if (attempt <= 0) return 0;
+  const base = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+  // Jitter ±20% [0.8, 1.2]
+  const jitter = 0.8 + Math.random() * 0.4;
+  return Math.round(base * jitter);
+}
 
 /**
  * Tùy chọn đầu vào cho hook `useMatchChannel`.
@@ -73,6 +94,12 @@ export interface UseMatchChannelOptions {
    * Mặc định là `true`. Truyền `false` khi muốn tạm dừng hoặc kiểm soát theo màn hình.
    */
   readonly enabled?: boolean;
+
+  /**
+   * Callback được kích hoạt mỗi khi kênh nối lại thành công sau sự cố rớt mạng.
+   * (P3.5b sẽ truyền pipeline resync vào callback này).
+   */
+  readonly onReconnected?: () => void;
 }
 
 /**
@@ -93,7 +120,7 @@ export interface UseMatchChannelResult {
  * React Hook quản lý toàn diện vòng đời kết nối Realtime Transport của một ván đấu.
  */
 export function useMatchChannel(options: UseMatchChannelOptions): UseMatchChannelResult {
-  const { matchId, self, onMessage, enabled = true } = options;
+  const { matchId, self, onMessage, enabled = true, onReconnected } = options;
 
   // Lấy trạng thái phản chiếu từ transportStore
   const status = useTransportStatus();
@@ -105,11 +132,26 @@ export function useMatchChannel(options: UseMatchChannelOptions): UseMatchChanne
   // Số đếm ID lượt kết nối tăng dần (Chống Race Condition - Ca a)
   const connectionIdRef = useRef<number>(0);
 
-  // Tham chiếu giữ callback onMessage mới nhất mà không gây re-trigger useEffect (Ca d)
+  // Tham chiếu giữ callback onMessage và onReconnected mới nhất mà không gây re-trigger useEffect (Ca d)
   const onMessageRef = useRef<(env: TransportEnvelope) => void>(onMessage);
+  const onReconnectedRef = useRef<(() => void) | undefined>(onReconnected);
+
   useEffect(() => {
     onMessageRef.current = onMessage;
+    onReconnectedRef.current = onReconnected;
   });
+
+  // Số lần thử kết nối lại tự động hiện tại
+  const attemptRef = useRef<number>(0);
+
+  // Thời điểm rớt mạng đầu tiên (dùng để tính cửa sổ 60s)
+  const droppedAtRef = useRef<number | null>(null);
+
+  // Timer chờ backoff
+  const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cờ báo hiệu ngắt kết nối chủ đích (unmount hoặc enabled=false) để không auto-reconnect
+  const isIntentionalDisconnectRef = useRef<boolean>(false);
 
   // Memoize thông tin self để tránh trigger lại effect khi object self thay đổi con trỏ
   const selfUserId = self?.userId;
@@ -124,6 +166,9 @@ export function useMatchChannel(options: UseMatchChannelOptions): UseMatchChanne
       joinedAt: selfJoinedAt,
     };
   }, [selfUserId, selfDisplayName, selfJoinedAt]);
+
+  // Ref giữ hàm scheduleAutoReconnect để decouple với establishConnection
+  const scheduleAutoReconnectRef = useRef<() => Promise<void>>();
 
   /**
    * Hàm khởi tạo kết nối an toàn cho một lượt cụ thể.
@@ -145,11 +190,36 @@ export function useMatchChannel(options: UseMatchChannelOptions): UseMatchChanne
         },
         onStatusChange: (newStatus, detail) => {
           if (connectionIdRef.current === runId && !isCancelled) {
-            useTransportStore.getState().setStatus(newStatus);
-            if (detail) {
-              useTransportStore.getState().setLastError(detail);
-            } else if (newStatus === 'connected') {
+            if (newStatus === 'connected') {
+              const wasReconnecting = droppedAtRef.current !== null || attemptRef.current > 0;
+              droppedAtRef.current = null;
+              attemptRef.current = 0;
+              useTransportStore.getState().setReconnectInfo(0, null);
+              useTransportStore.getState().setStatus('connected');
               useTransportStore.getState().setLastError(null);
+
+              if (reconnectTimerRef.current) {
+                clearTimeout(reconnectTimerRef.current);
+                reconnectTimerRef.current = null;
+              }
+
+              // Gọi callback onReconnected khi kết nối lại thành công sau sự cố
+              if (wasReconnecting) {
+                onReconnectedRef.current?.();
+              }
+            } else if (newStatus === 'error' || newStatus === 'closed') {
+              if (!isCancelled && !isIntentionalDisconnectRef.current && enabled) {
+                useTransportStore.getState().setLastError(detail || 'Mất kết nối với máy chủ.');
+                void scheduleAutoReconnectRef.current?.();
+              } else {
+                useTransportStore.getState().setStatus(newStatus);
+                if (detail) useTransportStore.getState().setLastError(detail);
+              }
+            } else {
+              useTransportStore.getState().setStatus(newStatus);
+              if (detail) {
+                useTransportStore.getState().setLastError(detail);
+              }
             }
           }
         },
@@ -164,10 +234,17 @@ export function useMatchChannel(options: UseMatchChannelOptions): UseMatchChanne
           .connect()
           .catch((err) => {
             if (connectionIdRef.current === runId && !isCancelled) {
-              useTransportStore.getState().setStatus('error');
-              useTransportStore
-                .getState()
-                .setLastError(err instanceof Error ? err.message : String(err));
+              if (!isIntentionalDisconnectRef.current && enabled) {
+                useTransportStore
+                  .getState()
+                  .setLastError(err instanceof Error ? err.message : String(err));
+                void scheduleAutoReconnectRef.current?.();
+              } else {
+                useTransportStore.getState().setStatus('error');
+                useTransportStore
+                  .getState()
+                  .setLastError(err instanceof Error ? err.message : String(err));
+              }
             }
           })
           .finally(() => {
@@ -188,23 +265,92 @@ export function useMatchChannel(options: UseMatchChannelOptions): UseMatchChanne
           useTransportStore.getState().reset();
         };
       } catch (createErr) {
-        useTransportStore.getState().setStatus('error');
-        useTransportStore
-          .getState()
-          .setLastError(createErr instanceof Error ? createErr.message : String(createErr));
+        if (!isIntentionalDisconnectRef.current && enabled) {
+          useTransportStore
+            .getState()
+            .setLastError(createErr instanceof Error ? createErr.message : String(createErr));
+          void scheduleAutoReconnectRef.current?.();
+        } else {
+          useTransportStore.getState().setStatus('error');
+          useTransportStore
+            .getState()
+            .setLastError(createErr instanceof Error ? createErr.message : String(createErr));
+        }
         return () => {
           isCancelled = true;
           useTransportStore.getState().reset();
         };
       }
     },
-    [],
+    [enabled],
   );
+
+  /**
+   * Hàm lên lịch tự động kết nối lại theo chiến lược Backoff lũy tiến & Cửa sổ bỏ cuộc.
+   */
+  const scheduleAutoReconnect = useCallback(async () => {
+    if (!matchId || !selfMemo || !enabled || isIntentionalDisconnectRef.current) {
+      return;
+    }
+
+    // 1. Đếm cửa sổ từ lần rớt đầu tiên (rớt lần mới = cửa sổ mới)
+    const now = Date.now();
+    if (droppedAtRef.current === null) {
+      droppedAtRef.current = now;
+      attemptRef.current = 0;
+    }
+
+    // 2. Đọc cấu hình cửa sổ reconnect từ system_config (fallback 60s an toàn)
+    const windowSeconds = await configRepository.getReconnectWindowSeconds();
+    const windowDeadline = droppedAtRef.current + windowSeconds * 1000;
+
+    // 3. Quá cửa sổ bỏ cuộc -> Chuyển sang 'failed' và dừng hẳn
+    if (Date.now() >= windowDeadline) {
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      useTransportStore.getState().setStatus('failed');
+      useTransportStore
+        .getState()
+        .setLastError('Đã vượt quá thời gian cho phép kết nối lại. Vui lòng thử lại thủ công.');
+      useTransportStore.getState().setReconnectInfo(attemptRef.current, windowDeadline);
+      return;
+    }
+
+    // 4. Tăng số lần thử và chuyển trạng thái sang reconnecting
+    const nextAttempt = attemptRef.current + 1;
+    attemptRef.current = nextAttempt;
+    useTransportStore.getState().setStatus('reconnecting');
+    useTransportStore.getState().setReconnectInfo(nextAttempt, windowDeadline);
+
+    // 5. Tính toán độ trễ backoff kèm Jitter ±20%
+    const delayMs = calculateBackoffDelayMs(nextAttempt - 1);
+
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+    }
+
+    reconnectTimerRef.current = setTimeout(() => {
+      reconnectTimerRef.current = null;
+      if (!matchId || !selfMemo || !enabled || isIntentionalDisconnectRef.current) {
+        return;
+      }
+
+      // Khởi tạo lượt kết nối mới
+      const nextRunId = ++connectionIdRef.current;
+      establishConnection(matchId, selfMemo, nextRunId);
+    }, delayMs);
+  }, [matchId, selfMemo, enabled, establishConnection]);
+
+  scheduleAutoReconnectRef.current = scheduleAutoReconnect;
 
   // ==============================================================================
   // VÒNG ĐỜI KẾT NỐI CHÍNH (LIFECYCLE EFFECT)
   // ==============================================================================
   useEffect(() => {
+    isIntentionalDisconnectRef.current = false;
+
     // 1. Giám sát Quota Watchdog (Chỉ chạy ở DEV)
     if (import.meta.env.DEV && matchId && selfMemo && enabled) {
       devActiveHookCount++;
@@ -217,8 +363,16 @@ export function useMatchChannel(options: UseMatchChannelOptions): UseMatchChanne
 
     const currentRunId = ++connectionIdRef.current;
 
-    // 2. Nếu matchId null, self null hoặc enabled=false -> Ngắt kết nối cũ và reset về idle
-    if (!matchId || !selfMemo || enabled === false) {
+    // 2. KỶ LUẬT DỪNG: Nếu matchId null, self null hoặc enabled=false -> Ngắt kết nối và hủy sạch timer
+    if (!matchId || !selfMemo || !enabled) {
+      isIntentionalDisconnectRef.current = true;
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      droppedAtRef.current = null;
+      attemptRef.current = 0;
+
       if (channelRef.current) {
         const prev = channelRef.current;
         channelRef.current = null;
@@ -233,7 +387,14 @@ export function useMatchChannel(options: UseMatchChannelOptions): UseMatchChanne
       };
     }
 
-    // 3. [CASE C - ĐỔI MATCHID]: Dọn dẹp kênh cũ trước khi thiết lập kênh mới
+    // 3. [CASE C - ĐỔI MATCHID]: Dọn dẹp kênh cũ và timer trước khi thiết lập kênh mới
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    droppedAtRef.current = null;
+    attemptRef.current = 0;
+
     if (channelRef.current) {
       const prev = channelRef.current;
       channelRef.current = null;
@@ -245,6 +406,11 @@ export function useMatchChannel(options: UseMatchChannelOptions): UseMatchChanne
 
     // 5. Cleanup khi unmount hoặc đổi dependencies (Ca a & b)
     return () => {
+      isIntentionalDisconnectRef.current = true;
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
       if (import.meta.env.DEV) {
         devActiveHookCount = Math.max(0, devActiveHookCount - 1);
       }
@@ -253,43 +419,70 @@ export function useMatchChannel(options: UseMatchChannelOptions): UseMatchChanne
   }, [matchId, selfMemo, enabled, establishConnection]);
 
   // ==============================================================================
-  // XỬ LÝ SỰ KIỆN THIẾT BỊ & MẠNG MOBILE
+  // XỬ LÝ SỰ KIỆN THIẾT BỊ & MẠNG MOBILE (AUTO-RECONNECT TRIGGERS)
   // ==============================================================================
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
     /**
-     * [CHÍNH SÁCH MOBILE - VISIBILITYCHANGE]:
-     * Khi người dùng chuyển tab hoặc ẩn app xuống nền (hidden):
-     * -> GIỮ NGUYÊN KẾT NỐI.
-     * Lý do: Đối với game đối kháng theo lượt (Caro, Cờ tướng), người chơi chuyển sang
-     * app khác vài giây để trả lời tin nhắn là bình thường. Supabase WebSocket có cơ chế
-     * ping/pong tự nhiên, nếu ngắt mạng quá lâu server sẽ tự timeout. Cơ chế phục hồi
-     * thông minh toàn diện sẽ được hoàn thiện tại Phase P3.5.
+     * [TRIGGER MOBILE QUAN TRỌNG NHẤT - VISIBILITYCHANGE]:
+     * Khi người dùng chuyển app hoặc mở lại màn hình (visible):
+     * Nếu trạng thái đang là 'reconnecting' hoặc 'error' -> Thử kết nối lại ngay lập tức
+     * (Bỏ qua thời gian chờ backoff còn lại để người dùng vào trận nhanh nhất).
      */
     const handleVisibilityChange = () => {
-      // Giữ kết nối, không ngắt khi hidden
+      if (document.visibilityState === 'visible' && matchId && selfMemo && enabled) {
+        const currentStatus = useTransportStore.getState().status;
+        if (currentStatus === 'reconnecting' || currentStatus === 'error') {
+          if (reconnectTimerRef.current) {
+            clearTimeout(reconnectTimerRef.current);
+            reconnectTimerRef.current = null;
+          }
+          const nextRunId = ++connectionIdRef.current;
+          establishConnection(matchId, selfMemo, nextRunId);
+        }
+      }
     };
 
     /**
-     * [SỰ KIỆN MẤT MẠNG OFFLINE]:
-     * Báo lỗi đường truyền cho UI đọc và hiển thị banner trạng thái.
+     * [SỰ KIỆN CÓ MẠNG TRỞ LẠI - ONLINE]:
+     * Khi thiết bị có sóng internet trở lại -> Thử kết nối ngay.
+     */
+    const handleOnline = () => {
+      if (matchId && selfMemo && enabled) {
+        const currentStatus = useTransportStore.getState().status;
+        if (currentStatus === 'reconnecting' || currentStatus === 'error') {
+          if (reconnectTimerRef.current) {
+            clearTimeout(reconnectTimerRef.current);
+            reconnectTimerRef.current = null;
+          }
+          const nextRunId = ++connectionIdRef.current;
+          establishConnection(matchId, selfMemo, nextRunId);
+        }
+      }
+    };
+
+    /**
+     * [SỰ KIỆN MẤT MẠNG - OFFLINE]:
+     * Kích hoạt quy trình auto-reconnect.
      */
     const handleOffline = () => {
-      if (matchId && enabled) {
-        useTransportStore.getState().setStatus('error');
+      if (matchId && selfMemo && enabled) {
         useTransportStore.getState().setLastError('Thiết bị mất kết nối Internet (offline).');
+        scheduleAutoReconnect();
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [matchId, enabled]);
+  }, [matchId, selfMemo, enabled, establishConnection, scheduleAutoReconnect]);
 
   /**
    * Hàm phát sóng thông điệp Envelope tới phòng đấu.
@@ -307,12 +500,22 @@ export function useMatchChannel(options: UseMatchChannelOptions): UseMatchChanne
   }, []);
 
   /**
-   * Hàm kết nối lại thủ công khi người dùng bấm thử lại hoặc mạng vừa online trở lại.
+   * Hàm kết nối lại thủ công khi người dùng bấm thử lại.
+   * Người dùng chủ động -> Cấp một cơ hội mới, reset cửa sổ 60s và số lần thử.
    */
   const reconnect = useCallback(async (): Promise<void> => {
-    if (!matchId || !selfMemo || enabled === false) {
+    if (!matchId || !selfMemo || !enabled) {
       return;
     }
+
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    droppedAtRef.current = Date.now();
+    attemptRef.current = 1;
+    useTransportStore.getState().setStatus('connecting');
+    useTransportStore.getState().setLastError(null);
 
     // Ngắt kênh cũ nếu có
     if (channelRef.current) {

@@ -24,8 +24,17 @@
  * - 'connected': Đã kết nối thành công và sẵn sàng phát sóng/nhận tin nhắn (SUBSCRIBED).
  * - 'error': Gặp lỗi đường truyền mạng hoặc kênh bị từ chối (TIMED_OUT, CHANNEL_ERROR).
  * - 'closed': Đã ngắt kết nối an toàn và dọn dẹp sạch sẽ tài nguyên (CLOSED/UNSUBSCRIBED).
+ * - 'reconnecting': Đang tự động kết nối lại theo lịch backoff sau khi rớt mạng.
+ * - 'failed': Đã vượt quá cửa sổ thử lại (reconnect window), dừng hẳn và cần người dùng thao tác thủ công.
  */
-export type ChannelStatus = 'idle' | 'connecting' | 'connected' | 'error' | 'closed';
+export type ChannelStatus =
+  | 'idle'
+  | 'connecting'
+  | 'connected'
+  | 'error'
+  | 'closed'
+  | 'reconnecting'
+  | 'failed';
 
 /**
  * Cấu trúc phong bì chuẩn hóa (Transport Envelope) bọc mọi thông điệp truyền qua Realtime Broadcast.
