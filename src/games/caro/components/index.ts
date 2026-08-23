@@ -11,3 +11,5 @@ export * from './InteractiveBoard';
 export * from './ModeSelect';
 export * from './MatchEndOverlay';
 export * from './GameStatsCard';
+export * from './OnlineLobby';
+export * from './OnlineWaiting';

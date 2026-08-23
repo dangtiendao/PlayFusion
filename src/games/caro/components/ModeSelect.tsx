@@ -61,11 +61,12 @@ export const ModeSelect: React.FC<ModeSelectProps> = ({
   shellApi,
   className = '',
 }) => {
-  // Lọc danh sách các mode offline được game Caro hỗ trợ
+  // Lọc danh sách các mode được game Caro hỗ trợ
   const availableModes = useMemo(
     () =>
       definition.modes.filter(
-        (m): m is 'vs_ai' | 'local_pvp' => m === 'vs_ai' || m === 'local_pvp',
+        (m): m is 'vs_ai' | 'local_pvp' | 'online_1v1' =>
+          m === 'vs_ai' || m === 'local_pvp' || m === 'online_1v1',
       ),
     [definition.modes],
   );
@@ -91,7 +92,7 @@ export const ModeSelect: React.FC<ModeSelectProps> = ({
   const savedConfig = savedMatch?.gameConfig as CaroMatchConfig | undefined;
 
   // State cấu hình trước khi vào trận
-  const [selectedMode, setSelectedMode] = useState<'vs_ai' | 'local_pvp'>(() => {
+  const [selectedMode, setSelectedMode] = useState<'vs_ai' | 'local_pvp' | 'online_1v1'>(() => {
     return availableModes.includes('vs_ai') ? 'vs_ai' : (availableModes[0] ?? 'local_pvp');
   });
 
@@ -103,13 +104,16 @@ export const ModeSelect: React.FC<ModeSelectProps> = ({
 
   // Xử lý chọn chế độ
   const handleSelectMode = useCallback(
-    (mode: 'vs_ai' | 'local_pvp') => {
+    (mode: 'vs_ai' | 'local_pvp' | 'online_1v1') => {
       shellApi?.playSfx('click');
       shellApi?.hapticTap();
 
       if (mode === 'local_pvp') {
         // Chế độ 2 người 1 máy: Vào ván ngay
         onStart({ mode: 'local_pvp' });
+      } else if (mode === 'online_1v1') {
+        // Chế độ online 1v1: Vào sảnh phòng đấu
+        onStart({ mode: 'online_1v1' });
       } else {
         setSelectedMode('vs_ai');
       }
