@@ -27,7 +27,7 @@ describe('RoomRepository Unit Tests (P3.3b)', () => {
   });
 
   describe('createRoom', () => {
-    it('1. Tạo phòng thành công -> trả về code và expiresAt', async () => {
+    it('1. Tạo phòng thành công -> trả về code và expiresAt (mặc định online_1v1)', async () => {
       (supabase.rpc as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         data: [{ code: 'ABC234', expires_at: '2026-08-22T23:30:00Z' }],
         error: null,
@@ -35,9 +35,27 @@ describe('RoomRepository Unit Tests (P3.3b)', () => {
 
       const result = await roomRepository.createRoom('caro');
 
-      expect(supabase.rpc).toHaveBeenCalledWith('create_room', { p_game_id: 'caro' });
+      expect(supabase.rpc).toHaveBeenCalledWith('create_room', {
+        p_game_id: 'caro',
+        p_mode: 'online_1v1',
+      });
       expect(result.code).toBe('ABC234');
       expect(result.expiresAt).toBe('2026-08-22T23:30:00Z');
+    });
+
+    it('1b. Tạo phòng mode online_correspondence thành công', async () => {
+      (supabase.rpc as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        data: [{ code: 'XYZ789', expires_at: '2026-08-22T23:30:00Z' }],
+        error: null,
+      });
+
+      const result = await roomRepository.createRoom('caro', 'online_correspondence');
+
+      expect(supabase.rpc).toHaveBeenCalledWith('create_room', {
+        p_game_id: 'caro',
+        p_mode: 'online_correspondence',
+      });
+      expect(result.code).toBe('XYZ789');
     });
 
     it('2. Game bị khóa -> ném RepoError với message phù hợp', async () => {
@@ -54,9 +72,16 @@ describe('RoomRepository Unit Tests (P3.3b)', () => {
   });
 
   describe('joinRoom', () => {
-    it('3. Vào phòng thành công -> trả về matchId, mySeat, gameId', async () => {
+    it('3. Vào phòng thành công -> trả về matchId, mySeat, gameId, mode', async () => {
       (supabase.rpc as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        data: [{ match_id: '123e4567-e89b-12d3-a456-426614174000', my_seat: 1, game_id: 'caro' }],
+        data: [
+          {
+            match_id: '123e4567-e89b-12d3-a456-426614174000',
+            my_seat: 1,
+            game_id: 'caro',
+            mode: 'online_correspondence',
+          },
+        ],
         error: null,
       });
 
@@ -66,6 +91,7 @@ describe('RoomRepository Unit Tests (P3.3b)', () => {
       expect(result.matchId).toBe('123e4567-e89b-12d3-a456-426614174000');
       expect(result.mySeat).toBe(1);
       expect(result.gameId).toBe('caro');
+      expect(result.mode).toBe('online_correspondence');
     });
 
     it('4. Phòng đã có người vào trước (ROOM_TAKEN) -> ném RepoError FATAL', async () => {

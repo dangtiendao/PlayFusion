@@ -35,7 +35,8 @@ interface DbParticipantWithProfileRow {
   user_id: string | null;
   is_bot: boolean;
   bot_level: string | null;
-  outcome: 'win' | 'loss' | 'draw' | null;
+  result?: 'win' | 'loss' | 'draw' | null;
+  outcome?: 'win' | 'loss' | 'draw' | null;
   placement: number | null;
   score: number | null;
   rating_delta: number | null;
@@ -47,9 +48,9 @@ interface DbParticipantWithProfileRow {
 interface DbMatchRow {
   id: string;
   game_id: string;
-  game_mode: string;
+  mode?: string;
+  game_mode?: string;
   is_ranked: boolean;
-  status: string;
   started_at: string;
   ended_at: string | null;
   duration_ms: number | null;
@@ -60,7 +61,7 @@ interface DbMatchRow {
 
 interface DbParticipantJoinRow {
   match_id: string;
-  created_at: string;
+  created_at?: string;
   match: DbMatchRow | null;
 }
 
@@ -73,7 +74,7 @@ function mapParticipant(p: DbParticipantWithProfileRow): MatchParticipantSummary
     userId: p.user_id,
     isBot: p.is_bot,
     botLevel: p.bot_level,
-    result: p.outcome,
+    result: p.result ?? p.outcome ?? null,
     placement: p.placement,
     score: p.score,
     ratingDelta: p.rating_delta,
@@ -91,7 +92,7 @@ function mapDbRowToMatchSummary(row: DbMatchRow): MatchSummary {
   return {
     id: row.id,
     gameId: row.game_id,
-    mode: row.game_mode,
+    mode: row.mode ?? row.game_mode ?? '',
     isRanked: row.is_ranked,
     startedAt: row.started_at,
     endedAt: row.ended_at,
@@ -112,10 +113,14 @@ export async function getMyRecentMatches(gameId?: string, limit = 20): Promise<M
   try {
     const {
       data: { user },
-      error: userError,
+      error: authError,
     } = await supabase.auth.getUser();
 
-    if (userError || !user) {
+    if (authError) {
+      throw new Error(`Lỗi xác thực người dùng: ${authError.message}`);
+    }
+
+    if (!user) {
       return [];
     }
 
@@ -124,13 +129,11 @@ export async function getMyRecentMatches(gameId?: string, limit = 20): Promise<M
       .select(
         `
         match_id,
-        created_at,
         match:matches!inner (
           id,
           game_id,
-          game_mode,
+          mode,
           is_ranked,
-          status,
           started_at,
           ended_at,
           duration_ms,
@@ -140,7 +143,7 @@ export async function getMyRecentMatches(gameId?: string, limit = 20): Promise<M
             user_id,
             is_bot,
             bot_level,
-            outcome,
+            result,
             placement,
             score,
             rating_delta,
@@ -157,7 +160,7 @@ export async function getMyRecentMatches(gameId?: string, limit = 20): Promise<M
       query = query.eq('match.game_id', gameId);
     }
 
-    const { data, error } = await query.order('created_at', { ascending: false }).limit(limit);
+    const { data, error } = await query.limit(limit);
 
     if (error) {
       throw new Error(`Không thể tải lịch sử đấu: ${error.message}`);
@@ -176,7 +179,8 @@ export async function getMyRecentMatches(gameId?: string, limit = 20): Promise<M
       }
     }
 
-    return summaries;
+    summaries.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+    return summaries.slice(0, limit);
   } catch (err: unknown) {
     if (err instanceof Error) {
       throw err;
@@ -199,9 +203,8 @@ export async function getMatchById(id: string): Promise<MatchSummary | null> {
         `
         id,
         game_id,
-        game_mode,
+        mode,
         is_ranked,
-        status,
         started_at,
         ended_at,
         duration_ms,
@@ -211,7 +214,7 @@ export async function getMatchById(id: string): Promise<MatchSummary | null> {
           user_id,
           is_bot,
           bot_level,
-          outcome,
+          result,
           placement,
           score,
           rating_delta,
@@ -378,9 +381,152 @@ export async function getLiveState(matchId: string): Promise<MatchLiveStateSumma
   }
 }
 
+export interface ActiveMatchInfo {
+  readonly matchId: string;
+  readonly gameId: string;
+}
+
+export interface ActiveMatchItem {
+  readonly matchId: string;
+  readonly gameId: string;
+  readonly mode: string;
+  readonly mySeat: number;
+  readonly currentSeat: number;
+  readonly myTurn: boolean;
+  readonly turnDeadline: string | null;
+  readonly opponentName: string;
+  readonly opponentAvatarUrl?: string | null;
+  readonly startedAt: string;
+}
+
+/**
+ * Lấy danh sách toàn bộ các ván đấu online đang diễn ra của người chơi hiện tại (cả realtime và correspondence).
+ * Tối đa 10 ván, sắp xếp ván tới lượt (myTurn = true) lên đầu, sau đó theo turnDeadline gần nhất.
+ */
+export async function getMyActiveMatches(): Promise<ActiveMatchItem[]> {
+  try {
+    const userRes = await supabase.auth.getUser();
+    const userId = userRes.data.user?.id;
+    if (!userId) return [];
+
+    // Query 1: Lấy danh sách trận mà tôi tham gia và chưa kết thúc
+    const { data: myParts, error: partErr } = await supabase
+      .from('match_participants')
+      .select('match_id, seat_index, matches!inner(id, game_id, mode, started_at, ended_at)')
+      .eq('user_id', userId)
+      .is('matches.ended_at', null)
+      .in('matches.mode', ['online_1v1', 'online_correspondence'])
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    if (partErr || !myParts || myParts.length === 0) return [];
+
+    const matchIds = myParts.map((p) => p.match_id);
+
+    // Query 2a: Lấy live_state để biết current_seat và turn_deadline
+    const { data: liveStates } = await supabase
+      .from('match_live_state')
+      .select('match_id, current_seat, turn_deadline')
+      .in('match_id', matchIds);
+
+    // Query 2b: Lấy thông tin đối thủ (tên hiển thị, avatar)
+    const { data: oppParts } = await supabase
+      .from('match_participants')
+      .select('match_id, seat_index, profiles(display_name, avatar_url)')
+      .in('match_id', matchIds)
+      .neq('user_id', userId);
+
+    const liveStateMap = new Map<string, { current_seat: number; turn_deadline: string | null }>();
+    if (liveStates) {
+      for (const ls of liveStates) {
+        liveStateMap.set(ls.match_id, {
+          current_seat: ls.current_seat,
+          turn_deadline: ls.turn_deadline,
+        });
+      }
+    }
+
+    const oppMap = new Map<string, { display_name?: string; avatar_url?: string }>();
+    if (oppParts) {
+      for (const op of oppParts) {
+        const prof = Array.isArray(op.profiles) ? op.profiles[0] : op.profiles;
+        if (prof) {
+          oppMap.set(op.match_id, {
+            display_name: prof.display_name,
+            avatar_url: prof.avatar_url,
+          });
+        }
+      }
+    }
+
+    const items: ActiveMatchItem[] = [];
+    for (const part of myParts) {
+      const matchData = Array.isArray(part.matches) ? part.matches[0] : part.matches;
+      if (!matchData || !matchData.id) continue;
+
+      const ls = liveStateMap.get(part.match_id);
+      const currentSeat = ls?.current_seat ?? 0;
+      const turnDeadline = ls?.turn_deadline ?? null;
+      const opp = oppMap.get(part.match_id);
+
+      const mySeat = part.seat_index;
+      const myTurn = currentSeat === mySeat;
+
+      items.push({
+        matchId: matchData.id,
+        gameId: matchData.game_id,
+        mode: matchData.mode,
+        mySeat,
+        currentSeat,
+        myTurn,
+        turnDeadline,
+        opponentName: opp?.display_name || 'Đối thủ',
+        opponentAvatarUrl: opp?.avatar_url || null,
+        startedAt: matchData.started_at,
+      });
+    }
+
+    // Sắp xếp: ván tới lượt lên đầu, sau đó theo hạn chót gần nhất
+    items.sort((a, b) => {
+      if (a.myTurn !== b.myTurn) {
+        return a.myTurn ? -1 : 1;
+      }
+      if (a.turnDeadline && b.turnDeadline) {
+        return new Date(a.turnDeadline).getTime() - new Date(b.turnDeadline).getTime();
+      }
+      return new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime();
+    });
+
+    return items;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Lấy thông tin ván đấu online đang diễn ra của người chơi hiện tại (nếu có).
+ * Dùng để hiển thị banner khôi phục ván đấu khi mở lại app hoặc chuyển sang visible.
+ */
+export async function getMyActiveMatch(): Promise<ActiveMatchInfo | null> {
+  try {
+    const matches = await getMyActiveMatches();
+    if (matches.length === 0) return null;
+    const match = matches.find((m) => m.mode === 'online_1v1') ?? matches[0];
+    if (!match) return null;
+    return {
+      matchId: match.matchId,
+      gameId: match.gameId,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export const matchRepository = {
   getMyRecentMatches,
   getMatchById,
   recordOfflineMatch,
   getLiveState,
+  getMyActiveMatch,
+  getMyActiveMatches,
 };

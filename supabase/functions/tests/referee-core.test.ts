@@ -199,6 +199,42 @@ Deno.test(
   },
 );
 
+Deno.test(
+  '2b. [Referee Core: init] Chống đua Concurrent Race: Hai bên cùng gọi init đồng thời -> tự động xử lý duplicate key',
+  async () => {
+    const env = createMockEnvironment();
+    let loadCount = 0;
+
+    const customDeps: RefereeDependencies = {
+      ...env.deps,
+      loadLiveState: async (id: string) => {
+        loadCount++;
+        // Lần đầu User B gọi loadLiveState: giả lập chưa thấy record (loadCount = 1)
+        if (loadCount === 1) return null;
+        // Sau khi bị duplicate key ở insertLiveState, loadLiveState lần 2 sẽ thấy record
+        return env.deps.loadLiveState(id);
+      },
+      insertLiveState: async (record) => {
+        // Giả lập User A đã insert vào DB thật trước
+        await env.deps.insertLiveState(record);
+        // Nhưng đối với User B ném duplicate key error
+        const err = new Error(
+          'duplicate key value violates unique constraint "match_live_state_pkey"',
+        );
+        throw err;
+      },
+    };
+
+    // User B gọi init (gặp đua) nhưng tự catch và trả về 200 an toàn
+    const resB = await handleInitAction('user_b', 'm1', customDeps);
+    assertEquals(resB.status, 200);
+    assertEquals(resB.body.ok, true);
+
+    const logs = env.getLogs();
+    assertEquals(logs[0].outcome, 'already_initialized_race');
+  },
+);
+
 Deno.test('3. [Referee Core: init] Người ngoài phòng gọi init -> 403 NOT_PARTICIPANT', async () => {
   const env = createMockEnvironment();
   const res = await handleInitAction('user_intruder', 'm1', env.deps);

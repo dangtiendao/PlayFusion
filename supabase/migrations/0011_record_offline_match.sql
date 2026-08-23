@@ -71,7 +71,7 @@ BEGIN
     v_match_id := (p_match->>'match_id')::uuid;
   EXCEPTION WHEN OTHERS THEN
     RAISE EXCEPTION 'Validation Error: match_id không phải là UUID hợp lệ.' USING ERRCODE = '22023';
-  END IF;
+  END;
 
   IF v_match_id IS NULL THEN
     RAISE EXCEPTION 'Validation Error: match_id không được để trống.' USING ERRCODE = '22023';

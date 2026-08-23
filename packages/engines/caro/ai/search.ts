@@ -15,16 +15,16 @@
  * Pure TypeScript — 100% Deterministic — Zero Dependencies.
  */
 
-import type { PlayerIndex } from '../../types';
-import type { CaroState, CaroMove } from '../types';
-import { caroEngine } from '../engine';
-import { checkWinAt } from '../win-check';
-import { PATTERN_SCORES } from './patterns';
-import { evaluateBoard } from './evaluate';
-import { generateCandidates } from './candidates';
-import { createSeededPrng } from './random';
-import type { AiLevel } from './levels';
-import { getAiLevelConfig } from './levels';
+import type { PlayerIndex } from '../../types/index.ts';
+import type { CaroState, CaroMove } from '../types.ts';
+import { caroEngine } from '../engine.ts';
+import { checkWinAt } from '../win-check.ts';
+import { PATTERN_SCORES } from './patterns.ts';
+import { evaluateBoard } from './evaluate.ts';
+import { generateCandidates } from './candidates.ts';
+import { createSeededPrng } from './random.ts';
+import type { AiLevel } from './levels.ts';
+import { getAiLevelConfig } from './levels.ts';
 
 /**
  * Cấu hình đầu vào cho thuật toán tìm kiếm nước đi AI.

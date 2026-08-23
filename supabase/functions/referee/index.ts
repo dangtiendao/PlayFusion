@@ -159,9 +159,17 @@ Deno.serve(async (req: Request) => {
       if (matchErr) throw new Error(`Lỗi khi kết thúc matches: ${matchErr.message}`);
 
       for (const p of participantsResult) {
+        let resultVal: 'win' | 'loss' | 'draw' | null = null;
+        if (p.is_winner === true) {
+          resultVal = 'win';
+        } else if (p.is_winner === false) {
+          resultVal = 'loss';
+        } else if (p.is_winner === null && finalData.end_reason === 'normal') {
+          resultVal = 'draw';
+        }
         await adminClient
           .from('match_participants')
-          .update({ is_winner: p.is_winner })
+          .update({ result: resultVal })
           .eq('match_id', id)
           .eq('user_id', p.user_id);
       }

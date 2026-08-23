@@ -10,9 +10,9 @@
  * Pure TypeScript — 100% Deterministic — Zero Dependencies.
  */
 
-import type { CaroState, CaroMove } from '../types';
-import { idx, xy, inBounds } from '../board';
-import { evaluateMove } from './evaluate';
+import type { CaroState, CaroMove } from '../types.ts';
+import { idx, xy, inBounds } from '../board.ts';
+import { evaluateMove } from './evaluate.ts';
 
 /**
  * Cấu hình tham số sinh nước ứng viên cho AI.

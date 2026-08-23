@@ -2,6 +2,7 @@ import { type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useOnlineStatus } from '@/core/useOnlineStatus';
 import { useGameSessionStore } from '@/stores/gameSessionStore';
+import { useActiveMatchesStore } from '@/stores/activeMatchesStore';
 
 /**
  * Interface định nghĩa một mục trên thanh điều hướng.
@@ -63,6 +64,7 @@ export function AppShell({
   const location = useLocation();
   const isOnline = useOnlineStatus();
   const isInGame = useGameSessionStore((state) => state.isInGame);
+  const myTurnCount = useActiveMatchesStore((state) => state.myTurnCount);
 
   // Xác định trang hiện tại để hiển thị tên trên Header
   const currentNav = navItems.find((item) => item.path === location.pathname);
@@ -115,7 +117,17 @@ export function AppShell({
                 }`
               }
             >
-              <span className="flex-none">{item.icon}</span>
+              <span className="relative flex-none">
+                {item.icon}
+                {item.path === '/' && myTurnCount > 0 && (
+                  <span
+                    data-testid="sidebar-turn-badge"
+                    className="absolute -top-1 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] font-black flex items-center justify-center shadow-sm"
+                  >
+                    {myTurnCount}
+                  </span>
+                )}
+              </span>
               <span className="truncate">{item.label}</span>
             </NavLink>
           ))}
@@ -138,15 +150,14 @@ export function AppShell({
         */}
         <header className="flex-none w-full bg-surface/90 dark:bg-surface-dark/90 backdrop-blur-md border-b border-surface-border dark:border-surface-dark-border z-30 pt-safe">
           <div className="w-full max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
-            <div className="flex items-center gap-2.5 min-w-0">
-              {/* Logo nhỏ chỉ hiện trên Mobile khi sidebar bị ẩn */}
-              <div className="md:hidden w-8 h-8 rounded-lg bg-primary-600 dark:bg-primary-500 flex items-center justify-center text-white font-bold text-sm shadow-sm flex-none">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-7 h-7 rounded-lg bg-primary-600 dark:bg-primary-500 flex md:hidden items-center justify-center text-white font-bold text-xs shadow-sm flex-none">
                 PF
               </div>
-              <div className="min-w-0">
-                <h2 className="text-base sm:text-lg font-bold tracking-tight text-slate-900 dark:text-white truncate">
+              <div className="truncate">
+                <span className="text-base font-bold text-slate-900 dark:text-white tracking-tight truncate block">
                   {currentTitle}
-                </h2>
+                </span>
               </div>
             </div>
 
@@ -205,7 +216,17 @@ export function AppShell({
                     }`
                   }
                 >
-                  <span className="flex items-center justify-center w-6 h-6">{item.icon}</span>
+                  <span className="relative flex items-center justify-center w-6 h-6">
+                    {item.icon}
+                    {item.path === '/' && myTurnCount > 0 && (
+                      <span
+                        data-testid="home-turn-badge"
+                        className="absolute -top-1 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] font-black flex items-center justify-center shadow-sm animate-pulse"
+                      >
+                        {myTurnCount}
+                      </span>
+                    )}
+                  </span>
                   <span className="truncate leading-tight mt-0.5">{item.label}</span>
                 </NavLink>
               ))}

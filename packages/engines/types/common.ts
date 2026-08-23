@@ -14,11 +14,19 @@
  * - 'solo': Chơi giải đố đơn lẻ (Puzzles, Luyện thế cờ).
  * - 'vs_ai': Chơi với máy tính / bot AI chạy trên Web Worker.
  * - 'local_pvp': 2 người chơi đối kháng trực tiếp trên cùng 1 thiết bị (Pass & Play).
- * - 'online_1v1': Đối kháng trực tuyến 1 vs 1 có tính điểm Elo hoặc ghép phòng.
+ * - 'online_1v1': Đối kháng trực tuyến 1 vs 1 có tính điểm Elo hoặc ghép phòng (đồng hồ realtime).
+ * - 'online_correspondence': Đấu theo lượt kiểu thư tín, mỗi nước có thời hạn riêng tính bằng giờ; netcode dùng chung cơ sở hạ tầng online (P3.6a).
  * - 'online_ffa': Đấu tự do nhiều người (Free For All, ví dụ Cờ cá ngựa 4 người).
  * - 'online_team': Đấu đồng đội (2 vs 2).
  */
-export type GameMode = 'solo' | 'vs_ai' | 'local_pvp' | 'online_1v1' | 'online_ffa' | 'online_team';
+export type GameMode =
+  | 'solo'
+  | 'vs_ai'
+  | 'local_pvp'
+  | 'online_1v1'
+  | 'online_correspondence'
+  | 'online_ffa'
+  | 'online_team';
 
 /**
  * Vị trí ghế ngồi của người chơi trong ván cờ (0-indexed).

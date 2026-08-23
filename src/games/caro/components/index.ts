@@ -13,3 +13,5 @@ export * from './MatchEndOverlay';
 export * from './GameStatsCard';
 export * from './OnlineLobby';
 export * from './OnlineWaiting';
+export * from './MatchClock';
+export * from './CorrespondenceDeadline';

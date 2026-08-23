@@ -36,6 +36,8 @@ export interface JoinRoomResultDto {
   readonly mySeat: number;
   /** Mã định danh trò chơi */
   readonly gameId: string;
+  /** Chế độ chơi của ván đấu (P3.6a) */
+  readonly mode?: string;
 }
 
 /**
@@ -125,6 +127,10 @@ function mapRoomRpcError(error: unknown): RepoError {
     return new RepoError('Bạn không phải là thành viên của phòng đấu này.', 'FATAL', error);
   }
 
+  if (rawMsg.includes('P0011') || rawMsg.includes('INVALID_GAME_MODE')) {
+    return new RepoError('Chế độ chơi phòng đấu không hợp lệ.', 'FATAL', error);
+  }
+
   if (rawMsg.includes('42501') || rawMsg.includes('UNAUTHORIZED') || rawCode === '42501') {
     return new RepoError('Vui lòng đăng nhập để thực hiện thao tác phòng đấu.', 'FATAL', error);
   }
@@ -141,11 +147,16 @@ export const roomRepository = {
    * Tạo phòng đấu mới với mã 6 ký tự an toàn.
    *
    * @param gameId Mã định danh trò chơi (ví dụ: 'caro').
+   * @param mode Chế độ chơi phòng đấu ('online_1v1' hoặc 'online_correspondence', mặc định: 'online_1v1').
    */
-  async createRoom(gameId: string): Promise<RoomDto> {
+  async createRoom(
+    gameId: string,
+    mode: 'online_1v1' | 'online_correspondence' = 'online_1v1',
+  ): Promise<RoomDto> {
     try {
       const { data, error } = await supabase.rpc('create_room', {
         p_game_id: gameId,
+        p_mode: mode,
       });
 
       if (error) {
@@ -191,6 +202,7 @@ export const roomRepository = {
         matchId: row.match_id,
         mySeat: row.my_seat,
         gameId: row.game_id,
+        mode: row.mode ?? 'online_1v1',
       };
     } catch (err) {
       throw mapRoomRpcError(err);

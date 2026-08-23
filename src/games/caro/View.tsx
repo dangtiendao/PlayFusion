@@ -377,8 +377,9 @@ export const CaroGameView: React.FC<GameViewProps> = ({
 
   // Bắt đầu ván đấu mới từ ModeSelect (setup -> playing hoặc setup -> online_lobby)
   const handleStartMatch = useCallback((config: CaroMatchConfig) => {
-    // Nếu chọn chế độ Online 1v1 -> chuyển sang Sảnh phòng đấu (P3.3b)
-    if (config.mode === 'online_1v1') {
+    // Nếu chọn chế độ Online 1v1 hoặc Chơi theo lượt -> chuyển sang Sảnh phòng đấu (P3.3b & P3.6c)
+    if (config.mode === 'online_1v1' || config.mode === 'online_correspondence') {
+      setMatchConfig(config);
       setScreen('online_lobby');
       return;
     }
@@ -736,12 +737,16 @@ export const CaroGameView: React.FC<GameViewProps> = ({
   }
 
   // ============================================================================
-  // RENDER MÀN HÌNH SẢNH ONLINE (P3.3b): TẠO PHÒNG / NHẬP MÃ 6 KÝ TỰ
+  // RENDER MÀN HÌNH SẢNH ONLINE (P3.3b & P3.6c): TẠO PHÒNG / NHẬP MÃ 6 KÝ TỰ
   // ============================================================================
+  const onlineMode =
+    matchConfig?.mode === 'online_correspondence' ? 'online_correspondence' : 'online_1v1';
+
   if (screen === 'online_lobby') {
     return (
       <div data-testid="caro-online-lobby-screen" className="w-full flex flex-col items-center">
         <OnlineLobby
+          mode={onlineMode}
           onBack={() => setScreen('setup')}
           onRoomCreated={(code, expiresAt) => {
             setCreatedRoom({ code, expiresAt });
@@ -759,13 +764,14 @@ export const CaroGameView: React.FC<GameViewProps> = ({
   }
 
   // ============================================================================
-  // RENDER MÀN HÌNH CHỜ ĐỐI THỦ (P3.3b): MÃ PHÒNG TO, SHARE LINK, PRESENCE
+  // RENDER MÀN HÌNH CHỜ ĐỐI THỦ (P3.3b & P3.6c): MÃ PHÒNG TO, SHARE LINK, PRESENCE
   // ============================================================================
   if (screen === 'online_waiting' && createdRoom) {
     return (
       <div data-testid="caro-online-waiting-screen" className="w-full flex flex-col items-center">
         <OnlineWaiting
           code={createdRoom.code}
+          mode={onlineMode}
           expiresAt={createdRoom.expiresAt}
           onMatchFound={(matchId, mySeat) => {
             navigate(`/game/caro/online/${matchId}`, {

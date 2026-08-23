@@ -21,6 +21,8 @@ import { useAuthStore } from '@/stores/authStore';
 export interface OnlineWaitingProps {
   /** Mã phòng 6 ký tự */
   readonly code: string;
+  /** Chế độ phòng đấu ('online_1v1' hoặc 'online_correspondence') */
+  readonly mode?: 'online_1v1' | 'online_correspondence';
   /** Thời điểm hết hạn phòng (ISO string) */
   readonly expiresAt: string;
   /** Callback khi phát hiện ván đấu đã ghép thành công -> điều hướng vào trận */
@@ -33,6 +35,7 @@ export interface OnlineWaitingProps {
 
 export const OnlineWaiting: React.FC<OnlineWaitingProps> = ({
   code,
+  mode = 'online_1v1',
   expiresAt,
   onMatchFound,
   onCancel,
@@ -227,6 +230,16 @@ export const OnlineWaiting: React.FC<OnlineWaitingProps> = ({
           >
             {code}
           </div>
+          {mode === 'online_correspondence' ? (
+            <p className="text-xs text-amber-600 dark:text-amber-300 font-medium">
+              📬 Gửi lời mời cho bạn bè — sau khi vào trận, mỗi nước có 24 giờ (hạn phòng chờ: 30
+              phút).
+            </p>
+          ) : (
+            <p className="text-xs text-slate-500 dark:text-slate-400 font-normal">
+              Lời mời có hiệu lực trong 30 phút.
+            </p>
+          )}
         </div>
 
         {/* Nút Copy mã & Share link */}

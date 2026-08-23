@@ -14,6 +14,8 @@ import type { GameShellApi } from '../../types';
 import { roomRepository } from '@/repositories/roomRepository';
 
 export interface OnlineLobbyProps {
+  /** Chế độ phòng đấu ('online_1v1' hoặc 'online_correspondence') */
+  readonly mode?: 'online_1v1' | 'online_correspondence';
   /** Callback quay lại màn hình chọn chế độ */
   readonly onBack: () => void;
   /** Callback khi tạo phòng thành công -> chuyển sang màn hình chờ */
@@ -25,6 +27,7 @@ export interface OnlineLobbyProps {
 }
 
 export const OnlineLobby: React.FC<OnlineLobbyProps> = ({
+  mode = 'online_1v1',
   onBack,
   onRoomCreated,
   onRoomJoined,
@@ -43,7 +46,7 @@ export const OnlineLobby: React.FC<OnlineLobbyProps> = ({
       setIsCreating(true);
       setErrorMessage(null);
 
-      const room = await roomRepository.createRoom('caro');
+      const room = await roomRepository.createRoom('caro', mode);
       onRoomCreated(room.code, room.expiresAt);
     } catch (err) {
       const msg = (err as { message?: string })?.message || 'Không thể tạo phòng đấu lúc này.';
@@ -53,7 +56,7 @@ export const OnlineLobby: React.FC<OnlineLobbyProps> = ({
     } finally {
       setIsCreating(false);
     }
-  }, [shellApi, onRoomCreated]);
+  }, [mode, shellApi, onRoomCreated]);
 
   // Xử lý thay đổi input mã phòng (auto-uppercase & lọc ký tự an toàn)
   const handleCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -107,8 +110,10 @@ export const OnlineLobby: React.FC<OnlineLobbyProps> = ({
         </button>
 
         <div className="flex items-center gap-2">
-          <span className="text-xl">🌐</span>
-          <h2 className="text-base font-black text-slate-900 dark:text-white">Đấu 1v1 Online</h2>
+          <span className="text-xl">{mode === 'online_correspondence' ? '📬' : '🌐'}</span>
+          <h2 className="text-base font-black text-slate-900 dark:text-white">
+            {mode === 'online_correspondence' ? 'Chơi Theo Lượt (24h/nước)' : 'Đấu 1v1 Online'}
+          </h2>
         </div>
       </div>
 
@@ -130,7 +135,9 @@ export const OnlineLobby: React.FC<OnlineLobbyProps> = ({
             <span>👑</span> Tạo phòng & mời bạn bè
           </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Hệ thống sinh mã 6 ký tự chia sẻ qua Zalo/Messenger
+            {mode === 'online_correspondence'
+              ? 'Hệ thống sinh mã 6 ký tự. Mỗi nước có 24h, thoải mái thoát app.'
+              : 'Hệ thống sinh mã 6 ký tự chia sẻ qua Zalo/Messenger'}
           </p>
         </div>
 

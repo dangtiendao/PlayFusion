@@ -218,4 +218,19 @@ describe('Caro ModeSelect Component (ModeSelect.tsx - P1.5a & P1.5b)', () => {
     expect(mockShellApi.hapticTap).toHaveBeenCalled();
     expect(mockOnDiscardSavedMatch).toHaveBeenCalledTimes(1);
   });
+
+  it('9. Chọn chế độ "Chơi theo lượt" (online_correspondence) -> gọi onStart({ mode: "online_correspondence" })', () => {
+    render(<ModeSelect definition={caroManifest} onStart={mockOnStart} shellApi={mockShellApi} />);
+
+    const corrBtn = screen.getByTestId('mode-btn-online_correspondence');
+    expect(corrBtn).not.toBeNull();
+
+    act(() => {
+      fireEvent.click(corrBtn);
+    });
+
+    expect(mockShellApi.playSfx).toHaveBeenCalledWith('click');
+    expect(mockShellApi.hapticTap).toHaveBeenCalled();
+    expect(mockOnStart).toHaveBeenCalledWith({ mode: 'online_correspondence' });
+  });
 });

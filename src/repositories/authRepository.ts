@@ -37,13 +37,24 @@ export interface AppAuthUser {
 export function formatAuthUser(user: User | null): AppAuthUser | null {
   if (!user) return null;
 
-  // Nhận diện trạng thái ẩn danh qua cờ is_anonymous hoặc app_metadata/identities
+  // Kiểm tra danh tính chính thức (Google, Email, v.v.)
+  const hasOfficialIdentity =
+    Array.isArray(user.identities) &&
+    user.identities.some((id) => id.provider && id.provider !== 'anonymous');
+
+  const appProviders = (user.app_metadata?.providers as string[] | undefined) || [];
+  const hasOfficialProvider =
+    appProviders.some((p) => p !== 'anonymous') ||
+    (Boolean(user.app_metadata?.provider) && user.app_metadata?.provider !== 'anonymous');
+
+  const hasEmail = Boolean(user.email);
+
+  // Người dùng là Ẩn Danh khi và chỉ khi KHÔNG có bất kỳ danh tính chính thức nào và KHÔNG có email
   const isAnonymous =
-    Boolean(user.is_anonymous) ||
-    user.app_metadata?.provider === 'anonymous' ||
-    (Array.isArray(user.identities) &&
-      user.identities.length > 0 &&
-      user.identities.every((id) => id.provider === 'anonymous'));
+    !hasOfficialIdentity &&
+    !hasOfficialProvider &&
+    !hasEmail &&
+    (Boolean(user.is_anonymous) || user.app_metadata?.provider === 'anonymous');
 
   const userMetadata = user.user_metadata ?? {};
   const email = user.email || (userMetadata.email as string | undefined);
@@ -55,15 +66,19 @@ export function formatAuthUser(user: User | null): AppAuthUser | null {
   const avatarUrl =
     (userMetadata.avatar_url as string | undefined) || (userMetadata.picture as string | undefined);
 
+  const officialProviderName =
+    user.identities?.find((id) => id.provider && id.provider !== 'anonymous')?.provider ||
+    appProviders.find((p) => p !== 'anonymous') ||
+    (user.app_metadata?.provider !== 'anonymous' ? user.app_metadata?.provider : undefined) ||
+    (hasEmail ? 'google' : undefined);
+
   return {
     id: user.id,
     isAnonymous,
     email,
     displayName,
     avatarUrl,
-    provider:
-      (user.app_metadata?.provider as string | undefined) ??
-      (isAnonymous ? 'anonymous' : undefined),
+    provider: officialProviderName ?? (isAnonymous ? 'anonymous' : undefined),
   };
 }
 
@@ -196,7 +211,26 @@ export async function linkGoogleToAnonymous(options?: { redirectTo?: string }): 
       },
     });
 
-    if (error) throw error;
+    if (error) {
+      const msg = (error.message || '').toLowerCase();
+      const code = (error as unknown as { code?: string }).code || '';
+      if (
+        code === 'manual_linking_disabled' ||
+        msg.includes('manual linking is disabled') ||
+        msg.includes('manual_linking_disabled')
+      ) {
+        // Fallback sang đăng nhập Google thông thường nếu Manual Linking chưa bật trên Supabase
+        const { error: oauthError } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            redirectTo: redirectUrl,
+          },
+        });
+        if (oauthError) throw oauthError;
+        return;
+      }
+      throw error;
+    }
   } catch (err: unknown) {
     throw mapAuthError(err as Error);
   }

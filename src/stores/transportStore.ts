@@ -33,6 +33,10 @@ export interface TransportState {
   readonly members: readonly PresenceMember[];
   /** Thông điệp lỗi chi tiết gần nhất nếu có sự cố kết nối */
   readonly lastError: string | null;
+  /** Số lần đã thử kết nối lại tự động */
+  readonly reconnectAttempt: number;
+  /** Thời điểm hết hạn cửa sổ kết nối lại (timestamp ms) hoặc null */
+  readonly windowDeadline: number | null;
 }
 
 /**
@@ -47,6 +51,8 @@ export interface TransportActions {
   readonly setMembers: (members: PresenceMember[]) => void;
   /** Cập nhật thông tin lỗi kết nối */
   readonly setLastError: (error: string | null) => void;
+  /** Cập nhật thông tin số lần thử và hạn chót cửa sổ reconnect */
+  readonly setReconnectInfo: (attempt: number, windowDeadline: number | null) => void;
   /** Đưa toàn bộ trạng thái về mặc định khi rời phòng / unmount */
   readonly reset: () => void;
 }
@@ -58,6 +64,8 @@ const initialState: TransportState = {
   status: 'idle',
   members: [],
   lastError: null,
+  reconnectAttempt: 0,
+  windowDeadline: null,
 };
 
 /**
@@ -70,6 +78,7 @@ export const useTransportStore = create<TransportStore>((set) => ({
   setStatus: (status) => set({ status }),
   setMembers: (members) => set({ members }),
   setLastError: (lastError) => set({ lastError }),
+  setReconnectInfo: (attempt, windowDeadline) => set({ reconnectAttempt: attempt, windowDeadline }),
   reset: () => set(initialState),
 }));
 
@@ -90,5 +99,13 @@ export const useTransportActiveChannelId = (): string | null =>
 
 /** Hook lấy thông điệp lỗi kết nối gần nhất */
 export const useTransportLastError = (): string | null => useTransportStore((s) => s.lastError);
+
+/** Hook lấy số lần đã thử kết nối lại tự động */
+export const useTransportReconnectAttempt = (): number =>
+  useTransportStore((s) => s.reconnectAttempt);
+
+/** Hook lấy thời điểm hết hạn cửa sổ kết nối lại */
+export const useTransportWindowDeadline = (): number | null =>
+  useTransportStore((s) => s.windowDeadline);
 
 export default useTransportStore;

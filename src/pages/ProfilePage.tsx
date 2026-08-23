@@ -13,6 +13,7 @@ import type { PlayerGameStats, MatchSummary } from '@/repositories/types';
 import { StatsSummary } from '@/components/stats/StatsSummary';
 import { GameStatCard } from '@/components/stats/GameStatCard';
 import { MatchHistoryList } from '@/components/stats/MatchHistoryList';
+import { ActiveMatchBanner } from '@/components/ActiveMatchBanner';
 
 /**
  * ==============================================================================
@@ -39,6 +40,7 @@ export function ProfilePage() {
   const user = useAuthStore((state) => state.user);
   const profile = useAuthStore((state) => state.profile);
   const authStatus = useAuthStore((state) => state.status);
+  const authError = useAuthStore((state) => state.error);
   const updateDisplayName = useAuthStore((state) => state.updateDisplayName);
   const linkGoogle = useAuthStore((state) => state.linkGoogle);
   const authSignOut = useAuthStore((state) => state.signOut);
@@ -177,7 +179,9 @@ export function ProfilePage() {
   const handleGoogleAuth = async () => {
     setIsLinkingGoogle(true);
     try {
-      await linkGoogle();
+      await linkGoogle({
+        redirectTo: typeof window !== 'undefined' ? window.location.origin + '/profile' : undefined,
+      });
     } catch {
       // Error được quản lý trong store
     } finally {
@@ -205,6 +209,9 @@ export function ProfilePage() {
 
   return (
     <div className="space-y-6 max-w-lg mx-auto pb-8">
+      {/* BANNER TRẬN ĐẤU DỞ DANG (P3.5b) */}
+      <ActiveMatchBanner />
+
       {/* 1. TIÊU ĐỀ TRANG */}
       <section className="text-center space-y-2">
         <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-primary-50 text-primary-700 dark:bg-primary-950/60 dark:text-primary-300 border border-primary-200 dark:border-primary-800">
@@ -488,6 +495,15 @@ export function ProfilePage() {
                 </p>
               </div>
             </div>
+
+            {authError && (
+              <div
+                data-testid="google-auth-error-banner"
+                className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300 font-medium"
+              >
+                ⚠️ {authError}
+              </div>
+            )}
 
             <button
               type="button"

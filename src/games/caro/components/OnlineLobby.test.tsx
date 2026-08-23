@@ -59,7 +59,7 @@ describe('OnlineLobby Component Tests (P3.3b)', () => {
     fireEvent.click(createBtn);
 
     await waitFor(() => {
-      expect(roomRepository.createRoom).toHaveBeenCalledWith('caro');
+      expect(roomRepository.createRoom).toHaveBeenCalledWith('caro', 'online_1v1');
       expect(onRoomCreatedMock).toHaveBeenCalledWith('XYZ789', '2026-08-22T23:30:00Z');
     });
   });
@@ -138,6 +138,32 @@ describe('OnlineLobby Component Tests (P3.3b)', () => {
       expect(screen.getByTestId('lobby-error-msg').textContent).toContain(
         'Phòng đấu đã hết hạn (quá 30 phút)',
       );
+    });
+  });
+
+  it('7. Truyền mode online_correspondence -> hiển thị tiêu đề và gọi createRoom với online_correspondence', async () => {
+    vi.mocked(roomRepository.createRoom).mockResolvedValueOnce({
+      code: 'CORR99',
+      expiresAt: '2026-08-22T23:30:00Z',
+    });
+
+    render(
+      <OnlineLobby
+        mode="online_correspondence"
+        onBack={onBackMock}
+        onRoomCreated={onRoomCreatedMock}
+        onRoomJoined={onRoomJoinedMock}
+      />,
+    );
+
+    expect(screen.getByText(/Chơi Theo Lượt/i)).toBeDefined();
+
+    const createBtn = screen.getByTestId('create-room-btn');
+    fireEvent.click(createBtn);
+
+    await waitFor(() => {
+      expect(roomRepository.createRoom).toHaveBeenCalledWith('caro', 'online_correspondence');
+      expect(onRoomCreatedMock).toHaveBeenCalledWith('CORR99', '2026-08-22T23:30:00Z');
     });
   });
 });
