@@ -5,7 +5,11 @@
  *
  * MỤC TIÊU & NHIỆM VỤ:
  * 1. TIẾP NHẬN REQUEST:
- *    - POST body: { action: 'init', matchId } HOẶC { action: 'move', matchId, moveSerialized, expectedMoveIndex }
+ *    - POST body:
+ *      + { action: 'init', matchId }
+ *      + { action: 'move', matchId, moveSerialized, expectedMoveIndex }
+ *      + { action: 'resign', matchId } (P3.4b)
+ *      + { action: 'claim_timeout', matchId } (P3.4b)
  * 2. XÁC THỰC AUTH JWT:
  *    - Trích xuất user từ Authorization Bearer header.
  * 3. KẾT NỐI DB & REALTIME:
@@ -22,6 +26,8 @@ import { createAdminClient, getUserFromRequest } from '../_shared/supabaseAdmin.
 import {
   handleInitAction,
   handleMoveAction,
+  handleResignAction,
+  handleClaimTimeoutAction,
   type RefereeDependencies,
   type MatchRecord,
   type ParticipantRecord,
@@ -59,6 +65,16 @@ Deno.serve(async (req: Request) => {
 
   // 3. Chuẩn bị Dependencies Inject cho logic Core
   const dependencies: RefereeDependencies = {
+    loadSystemConfig: async (key: string) => {
+      const { data } = await adminClient
+        .from('system_config')
+        .select('value')
+        .eq('key', key)
+        .maybeSingle();
+
+      return (data?.value as Record<string, unknown>) || null;
+    },
+
     loadMatchAndParticipants: async (id: string) => {
       const { data: matchData } = await adminClient
         .from('matches')
@@ -94,21 +110,29 @@ Deno.serve(async (req: Request) => {
         move_index: record.move_index,
         current_seat: record.current_seat,
         moves_serialized: record.moves_serialized,
+        clock: record.clock || null,
+        turn_started_at: record.turn_started_at || null,
+        turn_deadline: record.turn_deadline || null,
       });
 
       if (error) throw new Error(`Lỗi khi khởi tạo match_live_state: ${error.message}`);
     },
 
     updateLiveStateOptimistic: async (record) => {
+      const updateData: Record<string, unknown> = {
+        state_serialized: record.state_serialized,
+        move_index: record.next_move_index,
+        current_seat: record.current_seat,
+        moves_serialized: record.moves_serialized,
+        updated_at: new Date().toISOString(),
+      };
+      if (record.clock !== undefined) updateData.clock = record.clock;
+      if (record.turn_started_at !== undefined) updateData.turn_started_at = record.turn_started_at;
+      if (record.turn_deadline !== undefined) updateData.turn_deadline = record.turn_deadline;
+
       const { data, error } = await adminClient
         .from('match_live_state')
-        .update({
-          state_serialized: record.state_serialized,
-          move_index: record.next_move_index,
-          current_seat: record.current_seat,
-          moves_serialized: record.moves_serialized,
-          updated_at: new Date().toISOString(),
-        })
+        .update(updateData)
         .eq('match_id', record.match_id)
         .eq('move_index', record.expected_move_index)
         .select();
@@ -128,6 +152,7 @@ Deno.serve(async (req: Request) => {
           duration_ms: finalData.duration_ms,
           final_state: finalData.final_state,
           moves: finalData.moves,
+          end_reason: finalData.end_reason,
         })
         .eq('id', id);
 
@@ -200,9 +225,35 @@ Deno.serve(async (req: Request) => {
     });
   }
 
+  if (action === 'resign') {
+    const result = await handleResignAction(user.id, { matchId: matchId as string }, dependencies);
+    return new Response(JSON.stringify(result.body), {
+      status: result.status,
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
+  }
+
+  if (action === 'claim_timeout') {
+    const result = await handleClaimTimeoutAction(
+      user.id,
+      { matchId: matchId as string },
+      dependencies,
+    );
+    return new Response(JSON.stringify(result.body), {
+      status: result.status,
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
+  }
+
   return errorResponse(
     'BAD_ACTION',
-    `Action "${action}" không được hỗ trợ (chỉ hỗ trợ "init" hoặc "move").`,
+    `Action "${action}" không được hỗ trợ (chỉ hỗ trợ "init", "move", "resign", hoặc "claim_timeout").`,
     400,
   );
 });

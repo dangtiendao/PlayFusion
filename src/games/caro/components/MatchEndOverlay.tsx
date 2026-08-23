@@ -43,6 +43,8 @@ export interface MatchEndOverlayProps {
   readonly sessionScore?: SessionScore;
   /** Thống kê tích lũy toàn cục lưu trong Local Data (P1.5a) */
   readonly accumulatedStats?: GameLocalStats | null;
+  /** Lý do kết thúc ván đấu (P3.4c: normal | resign | timeout | abort) */
+  readonly endReason?: 'normal' | 'resign' | 'timeout' | 'abort' | string;
   /** Callback chơi lại ván mới (kèm đảo lượt đi trước) */
   readonly onRestart: () => void;
   /** Callback quay lại màn hình chọn chế độ */
@@ -64,6 +66,7 @@ export const MatchEndOverlay: React.FC<MatchEndOverlayProps> = ({
   moveCount,
   sessionScore,
   accumulatedStats,
+  endReason = 'normal',
   onRestart,
   onBackToSetup,
   onExit,
@@ -81,8 +84,8 @@ export const MatchEndOverlay: React.FC<MatchEndOverlayProps> = ({
   const winnerSeat = winParticipant?.playerIndex ?? null;
 
   // Xác định trạng thái thắng / thua / hòa cho người chơi
-  const isHumanWinner = isVsAi ? winnerSeat === humanSeat : winnerSeat !== null;
-  const isHumanLoser = isVsAi && winnerSeat !== null && winnerSeat !== humanSeat;
+  const isHumanWinner = winnerSeat === humanSeat;
+  const isHumanLoser = winnerSeat !== null && winnerSeat !== humanSeat;
 
   // Hiệu ứng âm thanh và xuất hiện sau 800ms
   useEffect(() => {
@@ -90,7 +93,7 @@ export const MatchEndOverlay: React.FC<MatchEndOverlayProps> = ({
       setIsVisible(true);
 
       // Kích hoạt âm thanh và haptics theo kết quả trận đấu
-      if (isDraw) {
+      if (isDraw || endReason === 'abort') {
         shellApi?.playSfx('click');
       } else if (isHumanWinner) {
         shellApi?.playSfx('success');
@@ -102,7 +105,7 @@ export const MatchEndOverlay: React.FC<MatchEndOverlayProps> = ({
     }, DELAY_BEFORE_SHOW_MS);
 
     return () => clearTimeout(timer);
-  }, [isDraw, isHumanWinner, isHumanLoser, shellApi]);
+  }, [isDraw, isHumanWinner, isHumanLoser, endReason, shellApi]);
 
   if (!isVisible) {
     return null;
@@ -116,13 +119,39 @@ export const MatchEndOverlay: React.FC<MatchEndOverlayProps> = ({
     return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  // Tiêu đề và icon chính
+  // Tiêu đề và icon chính theo endReason
   let title = 'VÁN ĐẤU HÒA!';
   let emoji = '🤝';
   let bannerColorClass = 'from-amber-500/20 to-amber-600/10 border-amber-500/40 text-amber-300';
 
-  if (!isDraw) {
-    if (isVsAi) {
+  if (endReason === 'abort') {
+    title = 'VÁN ĐẤU BỊ HỦY!';
+    emoji = '⚠️';
+    bannerColorClass = 'from-amber-500/20 to-slate-800/40 border-amber-500/40 text-amber-300';
+  } else if (endReason === 'resign') {
+    if (isHumanWinner) {
+      title = 'ĐỐI THỦ ĐÃ ĐẦU HÀNG! 🎉';
+      emoji = '🏆';
+      bannerColorClass =
+        'from-emerald-500/20 to-cyan-500/10 border-emerald-500/40 text-emerald-300';
+    } else {
+      title = 'BẠN ĐÃ ĐẦU HÀNG!';
+      emoji = '🏳️';
+      bannerColorClass = 'from-rose-500/20 to-rose-600/10 border-rose-500/40 text-rose-300';
+    }
+  } else if (endReason === 'timeout') {
+    if (isHumanWinner) {
+      title = 'ĐỐI THỦ HẾT GIỜ! 🎉';
+      emoji = '⏱️';
+      bannerColorClass =
+        'from-emerald-500/20 to-cyan-500/10 border-emerald-500/40 text-emerald-300';
+    } else {
+      title = 'BẠN THUA VÌ HẾT GIỜ!';
+      emoji = '⌛';
+      bannerColorClass = 'from-rose-500/20 to-rose-600/10 border-rose-500/40 text-rose-300';
+    }
+  } else if (!isDraw) {
+    if (isVsAi || matchConfig.mode === 'online_1v1') {
       if (isHumanWinner) {
         title = 'BẠN THẮNG! 🎉';
         emoji = '🏆';
@@ -130,7 +159,7 @@ export const MatchEndOverlay: React.FC<MatchEndOverlayProps> = ({
           'from-emerald-500/20 to-cyan-500/10 border-emerald-500/40 text-emerald-300';
       } else {
         title = 'BẠN THUA!';
-        emoji = '🤖';
+        emoji = isVsAi ? '🤖' : '😢';
         bannerColorClass = 'from-rose-500/20 to-rose-600/10 border-rose-500/40 text-rose-300';
       }
     } else {

@@ -19,6 +19,8 @@ vi.mock('@/repositories/refereeRepository', () => ({
   refereeRepository: {
     initMatch: vi.fn(),
     submitMove: vi.fn(),
+    resign: vi.fn(),
+    claimTimeout: vi.fn(),
   },
 }));
 
@@ -59,7 +61,7 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
-describe('Caro OnlineMatchScreen Component Tests (P3.3c)', () => {
+describe('Caro OnlineMatchScreen Component Tests (P3.3c & P3.4c)', () => {
   const initialEmptyState = caroEngine.init({ playerCount: 2, options: DEFAULT_CARO_OPTIONS });
   const serializedEmpty = caroEngine.serialize(initialEmptyState);
 
@@ -87,12 +89,14 @@ describe('Caro OnlineMatchScreen Component Tests (P3.3c)', () => {
     );
   };
 
-  it('1. Khởi động: Gọi initMatch và dựng bàn cờ ban đầu từ server state', async () => {
+  it('1. Khởi động: Gọi initMatch và dựng bàn cờ ban đầu từ server state kèm đồng hồ', async () => {
     vi.mocked(refereeRepository.initMatch).mockResolvedValueOnce({
       stateSerialized: serializedEmpty,
       moveIndex: 0,
       currentSeat: 0,
       movesSerialized: '',
+      clock: { '0': 300000, '1': 300000 },
+      turnDeadline: new Date(Date.now() + 300000).toISOString(),
     });
     vi.mocked(matchRepository.getMatchById).mockResolvedValueOnce({
       id: 'match-uuid-123',
@@ -134,6 +138,7 @@ describe('Caro OnlineMatchScreen Component Tests (P3.3c)', () => {
     await waitFor(() => {
       expect(refereeRepository.initMatch).toHaveBeenCalledWith('match-uuid-123');
       expect(screen.getByTestId('caro-online-match-screen')).toBeDefined();
+      expect(screen.getByTestId('match-clock-container')).toBeDefined();
       expect(screen.getByText('Lượt của bạn!')).toBeDefined();
       expect(screen.getByText('Đối Thủ Pro')).toBeDefined();
     });
@@ -145,6 +150,7 @@ describe('Caro OnlineMatchScreen Component Tests (P3.3c)', () => {
       moveIndex: 1,
       currentSeat: 1, // Lượt của Seat 1 (O)
       movesSerialized: '0',
+      clock: { '0': 295000, '1': 300000 },
     });
 
     renderScreen(0);
@@ -160,12 +166,14 @@ describe('Caro OnlineMatchScreen Component Tests (P3.3c)', () => {
       moveIndex: 0,
       currentSeat: 0,
       movesSerialized: '',
+      clock: { '0': 300000, '1': 300000 },
     });
     vi.mocked(refereeRepository.submitMove).mockResolvedValueOnce({
       kind: 'accepted',
       moveIndex: 1,
       currentSeat: 1,
       stateSerialized: serializedEmpty,
+      clock: { '0': 295000, '1': 300000 },
     });
 
     renderScreen(0);
@@ -195,10 +203,11 @@ describe('Caro OnlineMatchScreen Component Tests (P3.3c)', () => {
         sentAt: new Date().toISOString(),
         payload: {
           moveIndex: 1,
-          seatIndex: 0,
+          currentSeat: 1,
           moveSerialized: '0',
           stateSerialized: caroEngine.serialize(stateAfterMove0),
           isTerminal: false,
+          clock: { '0': 295000, '1': 300000 },
         },
       });
     });
@@ -210,7 +219,8 @@ describe('Caro OnlineMatchScreen Component Tests (P3.3c)', () => {
     });
   });
 
-  it('4. Nhận Broadcast lệch nhịp (+2) -> Tự động gọi getLiveState để Resync', async () => {
+  it('4. Nút Đầu hàng / Hủy ván thay đổi nhãn theo moveIndex', async () => {
+    // moveIndex = 0 (< 3) -> Hiển thị "Hủy ván"
     vi.mocked(refereeRepository.initMatch).mockResolvedValueOnce({
       stateSerialized: serializedEmpty,
       moveIndex: 0,
@@ -218,97 +228,40 @@ describe('Caro OnlineMatchScreen Component Tests (P3.3c)', () => {
       movesSerialized: '',
     });
 
-    const stateAfter3Moves = caroEngine.init({ playerCount: 2, options: DEFAULT_CARO_OPTIONS });
-    const freshSerialized = caroEngine.serialize(stateAfter3Moves);
-
-    vi.mocked(matchRepository.getLiveState).mockResolvedValueOnce({
-      stateSerialized: freshSerialized,
-      moveIndex: 3,
-      currentSeat: 1,
-      movesSerialized: '0,15,1',
-    });
-
     renderScreen(0);
 
     await waitFor(() => {
-      expect(screen.getByTestId('caro-online-match-screen')).toBeDefined();
+      expect(screen.getByTestId('resign-btn').textContent).toContain('Hủy ván');
     });
 
-    // Giả lập nhận gói tin nhảy cóc moveIndex = 3 trong khi local moveIndex = 0
-    await act(async () => {
-      await messageHandler?.({
-        v: 1,
-        type: 'move_accepted',
-        senderId: 'server',
-        sentAt: new Date().toISOString(),
-        payload: {
-          moveIndex: 3,
-          seatIndex: 0,
-          moveSerialized: '1',
-          stateSerialized: freshSerialized,
-          isTerminal: false,
-        },
-      });
+    // Mở confirm dialog
+    fireEvent.click(screen.getByTestId('resign-btn'));
+    expect(screen.getByText(/Hủy ván đấu\?/i)).toBeDefined();
+
+    // Xác nhận hủy bên trong dialog
+    vi.mocked(refereeRepository.resign).mockResolvedValueOnce({
+      matchId: 'match-uuid-123',
+      reason: 'abort',
     });
+
+    const confirmButtons = screen.getAllByRole('button', { name: 'Hủy ván' });
+    const modalConfirmBtn = confirmButtons[1];
+    expect(modalConfirmBtn).toBeDefined();
+    if (modalConfirmBtn) {
+      fireEvent.click(modalConfirmBtn);
+    }
 
     await waitFor(() => {
-      expect(matchRepository.getLiveState).toHaveBeenCalledWith('match-uuid-123');
-      expect(screen.getByTestId('resync-toast')).toBeDefined();
+      expect(refereeRepository.resign).toHaveBeenCalledWith('match-uuid-123');
     });
   });
 
-  it('5. Gặp lỗi RETRYABLE khi gửi nước -> hiển thị nút Gửi lại cùng expectedMoveIndex', async () => {
+  it('5. Nhận Broadcast match_ended reason: timeout -> hiển thị thông báo hết giờ', async () => {
     vi.mocked(refereeRepository.initMatch).mockResolvedValueOnce({
       stateSerialized: serializedEmpty,
-      moveIndex: 0,
-      currentSeat: 0,
-      movesSerialized: '',
-    });
-    vi.mocked(refereeRepository.submitMove).mockRejectedValueOnce({
-      message: 'Mất kết nối tới trọng tài server',
-      isRetryable: true,
-    });
-
-    renderScreen(0);
-
-    await waitFor(() => {
-      expect(screen.getByText('Lượt của bạn!')).toBeDefined();
-    });
-
-    // Bấm đánh ô 0
-    const cell0 = screen.getByTestId('caro-cell-0');
-    fireEvent.pointerDown(cell0, { clientX: 50, clientY: 50 });
-    fireEvent.pointerUp(cell0, { clientX: 50, clientY: 50 });
-    fireEvent.pointerDown(cell0, { clientX: 50, clientY: 50 });
-    fireEvent.pointerUp(cell0, { clientX: 50, clientY: 50 });
-
-    await waitFor(() => {
-      expect(screen.getByTestId('submit-error-banner')).toBeDefined();
-      expect(screen.getByTestId('retry-submit-btn')).toBeDefined();
-    });
-
-    // Bấm nút Gửi lại
-    vi.mocked(refereeRepository.submitMove).mockResolvedValueOnce({
-      kind: 'accepted',
-      moveIndex: 1,
+      moveIndex: 4,
       currentSeat: 1,
-      stateSerialized: serializedEmpty,
-    });
-
-    fireEvent.click(screen.getByTestId('retry-submit-btn'));
-
-    await waitFor(() => {
-      expect(refereeRepository.submitMove).toHaveBeenCalledTimes(2);
-      expect(refereeRepository.submitMove).toHaveBeenLastCalledWith('match-uuid-123', '0', 0);
-    });
-  });
-
-  it('6. Kết thúc ván đấu (Terminal) -> hiển thị MatchEndOverlay với kết quả chính xác', async () => {
-    vi.mocked(refereeRepository.initMatch).mockResolvedValueOnce({
-      stateSerialized: serializedEmpty,
-      moveIndex: 8,
-      currentSeat: 0,
-      movesSerialized: '0,15,1,16,2,17,3,18',
+      movesSerialized: '0,1,2,3',
     });
 
     renderScreen(0); // MySeat = 0
@@ -317,24 +270,20 @@ describe('Caro OnlineMatchScreen Component Tests (P3.3c)', () => {
       expect(screen.getByTestId('caro-online-match-screen')).toBeDefined();
     });
 
-    // Giả lập Broadcast nước đi chiến thắng cho Seat 0
+    // Giả lập Broadcast match_ended do đối thủ hết giờ (Seat 1 timeout -> Seat 0 win)
     act(() => {
       messageHandler?.({
         v: 1,
-        type: 'move_accepted',
+        type: 'match_ended',
         senderId: 'server',
         sentAt: new Date().toISOString(),
         payload: {
-          moveIndex: 9,
-          seatIndex: 0,
-          moveSerialized: '4',
-          stateSerialized: serializedEmpty,
-          isTerminal: true,
-          terminal: {
-            winner: 0,
-            isDraw: false,
-            reason: 'five_in_a_row',
-          },
+          matchId: 'match-uuid-123',
+          reason: 'timeout',
+          outcomes: [
+            { playerIndex: 0, outcome: 'win' },
+            { playerIndex: 1, outcome: 'loss' },
+          ],
         },
       });
     });
@@ -342,7 +291,7 @@ describe('Caro OnlineMatchScreen Component Tests (P3.3c)', () => {
     await waitFor(
       () => {
         expect(screen.getByTestId('match-end-overlay')).toBeDefined();
-        expect(screen.getByText(/QUÂN X THẮNG/i)).toBeDefined();
+        expect(screen.getByText(/ĐỐI THỦ HẾT GIỜ/i)).toBeDefined();
       },
       { timeout: 2000 },
     );

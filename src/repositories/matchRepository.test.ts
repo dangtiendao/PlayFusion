@@ -290,6 +290,9 @@ describe('Match Repository Unit Tests (matchRepository.ts - P2.5a)', () => {
         moveIndex: 5,
         currentSeat: 1,
         movesSerialized: '0,1,2,3,4',
+        clock: null,
+        turnStartedAt: null,
+        turnDeadline: null,
       });
     });
 
