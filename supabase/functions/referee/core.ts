@@ -159,14 +159,18 @@ export interface RefereeDependencies {
   ) => Promise<void>;
   readonly deleteLiveState: (matchId: string) => Promise<void>;
   readonly broadcast: (matchId: string, eventType: string, payload: unknown) => Promise<void>;
+  readonly settleMatch?: (matchId: string) => Promise<void>;
   readonly log: (entry: {
     fn: string;
     action: string;
     matchId: string;
-    userId: string;
+    userId?: string;
     moveIndex?: number;
     outcome: string;
-    ms: number;
+    ms?: number;
+    error?: string;
+    reason?: string;
+    entries?: number;
   }) => void;
 }
 
@@ -742,6 +746,19 @@ export async function handleMoveAction(
         serverNow: nowIso,
       });
 
+      if (deps.settleMatch) {
+        try {
+          await deps.settleMatch(matchId);
+        } catch (err: unknown) {
+          deps.log({
+            fn: 'referee',
+            action: 'settle',
+            matchId,
+            outcome: (err as Error)?.message || 'UNKNOWN_SETTLE_ERROR',
+          });
+        }
+      }
+
       deps.log({
         fn: 'referee',
         action: 'move',
@@ -1020,6 +1037,19 @@ export async function handleMoveAction(
       serverNow: nowIso,
     });
 
+    if (terminalResult.over && deps.settleMatch) {
+      try {
+        await deps.settleMatch(matchId);
+      } catch (err: unknown) {
+        deps.log({
+          fn: 'referee',
+          action: 'settle',
+          matchId,
+          outcome: (err as Error)?.message || 'UNKNOWN_SETTLE_ERROR',
+        });
+      }
+    }
+
     deps.log({
       fn: 'referee',
       action: 'move',
@@ -1201,6 +1231,19 @@ export async function handleResignAction(
       outcomes,
       serverNow: nowIso,
     });
+
+    if (deps.settleMatch) {
+      try {
+        await deps.settleMatch(matchId);
+      } catch (err: unknown) {
+        deps.log({
+          fn: 'referee',
+          action: 'settle',
+          matchId,
+          outcome: (err as Error)?.message || 'UNKNOWN_SETTLE_ERROR',
+        });
+      }
+    }
 
     deps.log({
       fn: 'referee',
@@ -1426,6 +1469,19 @@ export async function handleClaimTimeoutAction(
       outcomes,
       serverNow: nowIso,
     });
+
+    if (deps.settleMatch) {
+      try {
+        await deps.settleMatch(matchId);
+      } catch (err: unknown) {
+        deps.log({
+          fn: 'referee',
+          action: 'settle',
+          matchId,
+          outcome: (err as Error)?.message || 'UNKNOWN_SETTLE_ERROR',
+        });
+      }
+    }
 
     deps.log({
       fn: 'referee',

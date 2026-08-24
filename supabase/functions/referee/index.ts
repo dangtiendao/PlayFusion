@@ -33,6 +33,7 @@ import {
   type ParticipantRecord,
   type LiveStateRecord,
 } from './core.ts';
+import { executeSettlement } from './settle.ts';
 
 Deno.serve(async (req: Request) => {
   // 1. Xử lý preflight CORS
@@ -195,6 +196,10 @@ Deno.serve(async (req: Request) => {
 
       // Hủy channel ngay lập tức để không giữ kết nối ngầm trong Edge Function
       await adminClient.removeChannel(channel);
+    },
+
+    settleMatch: async (id: string) => {
+      await executeSettlement(id, adminClient, dependencies.broadcast, dependencies.log);
     },
 
     log: (entry) => {
