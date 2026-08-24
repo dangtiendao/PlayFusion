@@ -96,10 +96,7 @@ export function updateFfa(
   }
 
   const idSet = new Set<string>();
-  for (let i = 0; i < n; i++) {
-    const p = participants[i];
-    if (!p) continue;
-
+  for (const [i, p] of participants.entries()) {
     if (!p.id || typeof p.id !== 'string') {
       throw new RangeError(`Định danh người chơi (id) phải là chuỗi không rỗng tại vị trí ${i}.`);
     }
@@ -126,18 +123,12 @@ export function updateFfa(
   // 2. Tính toán điểm cho từng người chơi
   const results: FfaUpdateResult[] = [];
 
-  for (let i = 0; i < n; i++) {
-    const playerA = participants[i];
-    if (!playerA) continue;
-
+  for (const [i, playerA] of participants.entries()) {
     // A. Tính rating trung bình của N - 1 đối thủ còn lại
     let opponentRatingSum = 0;
-    for (let j = 0; j < n; j++) {
+    for (const [j, otherP] of participants.entries()) {
       if (i !== j) {
-        const otherP = participants[j];
-        if (otherP) {
-          opponentRatingSum += otherP.rating;
-        }
+        opponentRatingSum += otherP.rating;
       }
     }
     const avgOpponentRating = opponentRatingSum / (n - 1);
@@ -148,10 +139,8 @@ export function updateFfa(
     // C. Tính tổng chênh lệch điểm thực tế và kỳ vọng qua từng cặp đối thủ
     let totalScoreDiff = 0;
 
-    for (let j = 0; j < n; j++) {
+    for (const [j, playerB] of participants.entries()) {
       if (i === j) continue;
-      const playerB = participants[j];
-      if (!playerB) continue;
 
       // Xác định điểm đối đầu S_AB
       let scoreAB: number;

@@ -119,7 +119,7 @@ export function formatShortDeadline(deadlineIso: string | null): {
   const diffMs = new Date(deadlineIso).getTime() - Date.now();
   if (diffMs <= 0) return { text: 'QUÁ HẠN', isExpired: true, isUrgent: true };
 
-  const totalMin = Math.floor(diffMs / 60000);
+  const totalMin = Math.ceil(diffMs / 60000);
   if (totalMin < 60)
     return { text: `${Math.max(1, totalMin)}m`, isExpired: false, isUrgent: totalMin < 10 };
   const hours = Math.floor(totalMin / 60);

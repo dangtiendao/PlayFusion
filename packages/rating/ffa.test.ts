@@ -181,6 +181,15 @@ describe('packages/rating/ffa — Xác Thực Đầu Vào (Validation & Fail-Fas
     );
   });
 
+  it('ném RangeError khi id người chơi bị rỗng hoặc không phải chuỗi', () => {
+    expect(() =>
+      updateFfa([
+        { id: '', rating: 1200, gamesPlayed: 10, placement: 1 },
+        { id: 'p2', rating: 1300, gamesPlayed: 10, placement: 2 },
+      ]),
+    ).toThrow(RangeError);
+  });
+
   it('ném RangeError khi trùng lặp ID người chơi', () => {
     expect(() =>
       updateFfa([
