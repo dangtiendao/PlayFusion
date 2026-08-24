@@ -128,6 +128,7 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
       '@engines': path.resolve(__dirname, './packages/engines'),
+      '@rating': path.resolve(__dirname, './packages/rating'),
     },
   },
   build: {
@@ -142,7 +143,11 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
-      include: ['src/**/*.{ts,tsx}', 'packages/engines/**/*.{ts,tsx}'],
+      include: [
+        'src/**/*.{ts,tsx}',
+        'packages/engines/**/*.{ts,tsx}',
+        'packages/rating/**/*.{ts,tsx}',
+      ],
       exclude: [
         '**/*.test.{ts,tsx}',
         '**/*.spec.{ts,tsx}',

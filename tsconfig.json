@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "./packages/engines" },
+    { "path": "./packages/rating" },
     { "path": "./tsconfig.app.json" },
     { "path": "./tsconfig.node.json" }
   ],
@@ -9,7 +10,8 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@engines/*": ["packages/engines/*"]
+      "@engines/*": ["packages/engines/*"],
+      "@rating/*": ["packages/rating/*"]
     }
   }
 }
