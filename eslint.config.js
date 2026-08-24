@@ -50,6 +50,7 @@ export default tseslint.config(
   // Tuyệt đối KHÔNG import:
   //   1. "react" hoặc "react-dom" (chống dính coupling vào UI framework)
   //   2. "@/*" hoặc "src/*" (chống import ngược tầng UI / browser API wrapper)
+  //   3. "@rating/*" hoặc "packages/rating/*" (2 package engines và rating độc lập tuyệt đối)
   // Engine phải có khả năng chạy độc lập trên mọi môi trường (Client, Server Deno/Edge, WebWorker, Test).
   // ==============================================================================
   {
@@ -72,9 +73,69 @@ export default tseslint.config(
           ],
           patterns: [
             {
-              group: ['@/*', 'src/*', '**/src/*'],
+              group: [
+                '@/*',
+                'src/*',
+                '**/src/*',
+                '../src/*',
+                '../../src/*',
+                '@rating/*',
+                'packages/rating/*',
+                '**/packages/rating/*',
+                '../rating/*',
+                '../rating/**',
+              ],
               message:
-                'VI PHẠM KIẾN TRÚC: Engine trong packages/engines không được phép import từ tầng UI (@/* hoặc src/*)',
+                'VI PHẠM KIẾN TRÚC: Engine trong packages/engines không được phép import từ tầng UI (@/*, src/*) hoặc rating package.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  // ==============================================================================
+  // RULE KIẾN TRÚC BẤT BIẾN (ARCHITECTURAL BOUNDARY INVARIANT):
+  // Các module bên trong packages/rating/** là Rating logic thuần túy (Pure TS).
+  // Tuyệt đối KHÔNG import:
+  //   1. "react" hoặc "react-dom" (chống dính coupling vào UI framework)
+  //   2. "@/*" hoặc "src/*" (chống import ngược tầng UI / browser API wrapper)
+  //   3. "@engines/*" hoặc "packages/engines/*" (2 package engines và rating độc lập tuyệt đối)
+  // Rating phải có khả năng chạy độc lập trên mọi môi trường (Client preview, Server Edge Functions, Test).
+  // ==============================================================================
+  {
+    files: ['packages/rating/**/*.{ts,tsx,js,jsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'react',
+              message:
+                'VI PHẠM KIẾN TRÚC: packages/rating là TypeScript thuần túy, tuyệt đối KHÔNG import React.',
+            },
+            {
+              name: 'react-dom',
+              message:
+                'VI PHẠM KIẾN TRÚC: packages/rating là TypeScript thuần túy, tuyệt đối KHÔNG import react-dom.',
+            },
+          ],
+          patterns: [
+            {
+              group: [
+                '@/*',
+                'src/*',
+                '**/src/*',
+                '../src/*',
+                '../../src/*',
+                '@engines/*',
+                'packages/engines/*',
+                '**/packages/engines/*',
+                '../engines/*',
+                '../engines/**',
+              ],
+              message:
+                'VI PHẠM KIẾN TRÚC: Rating trong packages/rating không được phép import từ tầng UI (@/*, src/*) hoặc engines package.',
             },
           ],
         },

@@ -16,8 +16,8 @@ module.exports = {
     },
 
     // =========================================================================
-    // 2. LUẬT BẤT BIẾN: packages/engines KHÔNG ĐƯỢC PHỤ THUỘC VÀO src/
-    // Lý do: Engine là pure TS độc lập 100%, phải chạy được trên Client, Worker AI, và Server Deno.
+    // 2. LUẬT BẤT BIẾN: packages/engines VÀ packages/rating KHÔNG ĐƯỢC PHỤ THUỘC VÀO src/
+    // Lý do: Logic thuần túy độc lập 100%, phải chạy được trên Client, Worker AI, và Server Deno.
     // =========================================================================
     {
       name: 'engines-must-not-depend-on-src',
@@ -29,6 +29,53 @@ module.exports = {
       },
       to: {
         path: '^src',
+      },
+    },
+    {
+      name: 'rating-must-not-depend-on-src',
+      severity: 'error',
+      comment:
+        'VI PHẠM KIẾN TRÚC: packages/rating là logic thuần túy, tuyệt đối KHÔNG ĐƯỢC import từ bất kỳ module nào trong src/.',
+      from: {
+        path: '^packages/rating',
+      },
+      to: {
+        path: '^src',
+      },
+    },
+    {
+      name: 'engines-and-rating-must-be-independent',
+      severity: 'error',
+      comment:
+        'VI PHẠM KIẾN TRÚC: packages/engines và packages/rating là 2 package độc lập tuyệt đối, cấm import chéo lẫn nhau.',
+      from: {
+        path: '^packages/engines',
+      },
+      to: {
+        path: '^packages/rating',
+      },
+    },
+    {
+      name: 'rating-must-not-depend-on-engines',
+      severity: 'error',
+      comment: 'VI PHẠM KIẾN TRÚC: packages/rating không được phụ thuộc vào packages/engines.',
+      from: {
+        path: '^packages/rating',
+      },
+      to: {
+        path: '^packages/engines',
+      },
+    },
+    {
+      name: 'pure-packages-must-not-depend-on-react',
+      severity: 'error',
+      comment:
+        'VI PHẠM KIẾN TRÚC: packages/engines và packages/rating là pure TypeScript, tuyệt đối cấm import react hoặc react-dom.',
+      from: {
+        path: '^(packages/engines|packages/rating)',
+      },
+      to: {
+        path: '^(react|react-dom)',
       },
     },
 
@@ -134,6 +181,7 @@ module.exports = {
     enhancedResolveOptions: {
       exportsFields: ['exports'],
       conditionNames: ['import', 'require', 'node', 'default'],
+      extensions: ['.ts', '.tsx', '.d.ts', '.js', '.jsx', '.cjs', '.mjs', '.json'],
     },
     reporterOptions: {
       dot: {
