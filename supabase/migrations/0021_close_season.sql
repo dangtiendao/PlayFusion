@@ -31,6 +31,30 @@
 --    - REVOKE ALL từ PUBLIC, anon, authenticated. CHỈ GRANT EXECUTE cho service_role.
 -- ==============================================================================
 
+-- ==============================================================================
+-- 0. HÀM TRUY VẤN BẬC RANK ĐỒNG BỘ (IMMUTABLE HELPER)
+-- ==============================================================================
+-- NGUỒN CHÂN LÝ DUY NHẤT: Bắt buộc khớp 100% với TIER_TABLE trong packages/rating/tiers.ts
+-- 1800+ = master, 1600+ = diamond, 1400+ = platinum, 1200+ = gold, 1000+ = silver, <1000 = bronze.
+CREATE OR REPLACE FUNCTION public.get_tier_by_rating(p_rating numeric)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+SET search_path = ''
+AS $$
+  SELECT CASE
+    WHEN p_rating >= 1800 THEN 'master'
+    WHEN p_rating >= 1600 THEN 'diamond'
+    WHEN p_rating >= 1400 THEN 'platinum'
+    WHEN p_rating >= 1200 THEN 'gold'
+    WHEN p_rating >= 1000 THEN 'silver'
+    ELSE 'bronze'
+  END;
+$$;
+
+COMMENT ON FUNCTION public.get_tier_by_rating(numeric) IS
+  'Hàm tra cứu bậc rank chuẩn hóa theo Elo, đồng bộ 100% với TIER_TABLE trong TypeScript.';
+
 CREATE OR REPLACE FUNCTION public.close_season(
   p_confirm_season_id smallint,
   p_new_season_name text
@@ -82,8 +106,7 @@ BEGIN
   END IF;
 
   -- 3. BƯỚC c: CHỤP SNAPSHOT HUY HIỆU MÙA VĨNH VIỄN (USER_SEASON_BADGES)
-  -- LƯU Ý BẬC RANK: CASE WHEN bên dưới bắt buộc phải khớp 100% với TIER_TABLE trong packages/rating/tiers.ts
-  -- 1800+ = master, 1600+ = diamond, 1400+ = platinum, 1200+ = gold, 1000+ = silver, <1000 = bronze.
+  -- Sử dụng hàm public.get_tier_by_rating(rating) để đồng bộ 100% với TIER_TABLE
   WITH ranked_players AS (
     SELECT
       user_id,
@@ -103,15 +126,8 @@ BEGIN
           )::int
         ELSE NULL
       END AS computed_rank,
-      -- Phân bậc xếp hạng theo ngưỡng Elo chuẩn
-      CASE
-        WHEN rating >= 1800 THEN 'master'
-        WHEN rating >= 1600 THEN 'diamond'
-        WHEN rating >= 1400 THEN 'platinum'
-        WHEN rating >= 1200 THEN 'gold'
-        WHEN rating >= 1000 THEN 'silver'
-        ELSE 'bronze'
-      END AS computed_tier
+      -- Phân bậc xếp hạng qua hàm đồng bộ chuẩn
+      public.get_tier_by_rating(rating) AS computed_tier
     FROM public.player_ratings
     WHERE season_id = v_active_season_id
       AND games_played >= 1
