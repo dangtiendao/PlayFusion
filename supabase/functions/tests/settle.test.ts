@@ -27,6 +27,10 @@ function assert(condition: unknown, msg?: string): asserts condition {
 import {
   buildSettlement,
   executeSettlement,
+  parseRepeatOpponentConfig,
+  parseDailyCap,
+  parseAbandonPenalty,
+  getVietnamStartOfDayIso,
   type BuildSettlementInput,
 } from '../referee/settle.ts';
 
@@ -40,6 +44,9 @@ const DEFAULT_CONFIG_ROWS: Record<string, unknown> = {
   'reward.win_ranked': { coins: 50 },
   'reward.loss_ranked': { coins: 5 },
   'reward.draw_ranked': { coins: 20 },
+  'reward.daily_cap': { coins: 500 },
+  'reward.repeat_opponent': { full_matches: 2, dampen_factor: 0.5, zero_after: 5 },
+  'penalty.abandon': { coins: -20 },
 };
 
 // ==============================================================================
@@ -295,7 +302,7 @@ Deno.test(
         mode: 'online_1v1',
         is_ranked: true,
         season_id: 1,
-        end_reason: 'timeout', // Timeout vẫn tính đủ thưởng
+        end_reason: 'normal',
       },
       participants: [
         { user_id: 'u1', seat_index: 0, result: 'win', is_bot: false },
@@ -704,5 +711,189 @@ Deno.test(
     const errorLog = logEntries.find((l) => l.outcome === 'error');
     assert(errorLog !== undefined, 'Phải có log outcome = error');
     assertEquals(errorLog?.error, 'Database Connection Crashed');
+  },
+);
+
+// ==============================================================================
+// 4. KIỂM THỬ LUẬT CHỐNG FARM XU & PENALTY (PHASE P4.5a)
+// ==============================================================================
+Deno.test(
+  '15. [Anti-farm: Config & Timezone Helper] Parse các cấu hình chống farm và timezone VN',
+  () => {
+    const repeatCfg = parseRepeatOpponentConfig(DEFAULT_CONFIG_ROWS);
+    assertEquals(repeatCfg.fullMatches, 2);
+    assertEquals(repeatCfg.dampenFactor, 0.5);
+    assertEquals(repeatCfg.zeroAfter, 5);
+
+    const dailyCap = parseDailyCap(DEFAULT_CONFIG_ROWS);
+    assertEquals(dailyCap, 500);
+
+    const penalty = parseAbandonPenalty(DEFAULT_CONFIG_ROWS);
+    assertEquals(penalty, -20);
+
+    // Timezone VN ISO format check: YYYY-MM-DDT00:00:00+07:00
+    const testDate = new Date('2026-08-26T13:30:00Z'); // 20:30 VN
+    const startOfDay = getVietnamStartOfDayIso(testDate);
+    assertEquals(startOfDay, '2026-08-26T00:00:00+07:00');
+  },
+);
+
+Deno.test(
+  '16. [Anti-farm: Dampen 3 nhánh] todayPairCount 0 -> x1 (50/5), 3 -> x0.5 (25/2), 6 -> x0 (0/0)',
+  () => {
+    const baseMatch: BuildSettlementInput = {
+      match: {
+        game_id: 'caro',
+        mode: 'online_1v1',
+        is_ranked: true,
+        season_id: 1,
+        end_reason: 'normal',
+      },
+      participants: [
+        { user_id: 'u1', seat_index: 0, result: 'win', is_bot: false },
+        { user_id: 'u2', seat_index: 1, result: 'loss', is_bot: false },
+      ],
+      currentRatings: {
+        u1: { rating: 1200, gamesPlayed: 20 },
+        u2: { rating: 1200, gamesPlayed: 20 },
+      },
+      configRows: DEFAULT_CONFIG_ROWS,
+      todayPairCount: 0,
+    };
+
+    // Nhánh 1: 0 trận trước đó -> Thưởng 100% (50 xu / 5 xu)
+    const d0 = buildSettlement(baseMatch);
+    assertEquals(d0.is_noop, false);
+    if (!d0.is_noop) {
+      assertEquals(d0.payload.entries[0].coins, 50);
+      assertEquals(d0.payload.entries[1].coins, 5);
+    }
+
+    // Nhánh 2: 3 trận trước đó -> Thưởng 50% (25 xu / 2 xu)
+    const d3 = buildSettlement({ ...baseMatch, todayPairCount: 3 });
+    assertEquals(d3.is_noop, false);
+    if (!d3.is_noop) {
+      assertEquals(d3.payload.entries[0].coins, 25);
+      assertEquals(d3.payload.entries[1].coins, 2); // Math.floor(5 * 0.5) = 2
+    }
+
+    // Nhánh 3: 6 trận trước đó -> Thưởng 0% (0 xu / 0 xu)
+    const d6 = buildSettlement({ ...baseMatch, todayPairCount: 6 });
+    assertEquals(d6.is_noop, false);
+    if (!d6.is_noop) {
+      assertEquals(d6.payload.entries[0].coins, 0);
+      assertEquals(d6.payload.entries[1].coins, 0);
+    }
+  },
+);
+
+Deno.test(
+  '17. [Anti-farm: Timeout Penalty] end_reason = "timeout" -> Người thua bị phạt -20 xu, người thắng nhận đủ',
+  () => {
+    const input: BuildSettlementInput = {
+      match: {
+        game_id: 'caro',
+        mode: 'online_1v1',
+        is_ranked: true,
+        season_id: 1,
+        end_reason: 'timeout',
+      },
+      participants: [
+        { user_id: 'u1', seat_index: 0, result: 'win', is_bot: false },
+        { user_id: 'u2', seat_index: 1, result: 'loss', is_bot: false },
+      ],
+      currentRatings: {
+        u1: { rating: 1200, gamesPlayed: 20 },
+        u2: { rating: 1200, gamesPlayed: 20 },
+      },
+      configRows: DEFAULT_CONFIG_ROWS,
+      todayPairCount: 0,
+    };
+
+    const decision = buildSettlement(input);
+    assertEquals(decision.is_noop, false);
+    if (!decision.is_noop) {
+      assertEquals(decision.payload.entries[0].coins, 50, 'Người thắng nhận đủ 50 xu');
+      assertEquals(decision.payload.entries[1].coins, -20, 'Người thua hết giờ bị phạt -20 xu');
+    }
+  },
+);
+
+Deno.test(
+  '18. [Anti-farm: Resign Loss Reward] end_reason = "resign" -> Người đầu hàng nhận xu an ủi +5, không bị phạt',
+  () => {
+    const input: BuildSettlementInput = {
+      match: {
+        game_id: 'caro',
+        mode: 'online_1v1',
+        is_ranked: true,
+        season_id: 1,
+        end_reason: 'resign',
+      },
+      participants: [
+        { user_id: 'u1', seat_index: 0, result: 'win', is_bot: false },
+        { user_id: 'u2', seat_index: 1, result: 'loss', is_bot: false },
+      ],
+      currentRatings: {
+        u1: { rating: 1200, gamesPlayed: 20 },
+        u2: { rating: 1200, gamesPlayed: 20 },
+      },
+      configRows: DEFAULT_CONFIG_ROWS,
+      todayPairCount: 0,
+    };
+
+    const decision = buildSettlement(input);
+    assertEquals(decision.is_noop, false);
+    if (!decision.is_noop) {
+      assertEquals(decision.payload.entries[0].coins, 50);
+      assertEquals(
+        decision.payload.entries[1].coins,
+        5,
+        'Người đầu hàng nhận +5 xu an ủi bình thường',
+      );
+    }
+  },
+);
+
+Deno.test(
+  '19. [Anti-farm: Rating Invariance] Điểm Elo tính toán giữ nguyên 100% qua các nhánh giảm xu và phạt xu',
+  () => {
+    const baseInput: BuildSettlementInput = {
+      match: {
+        game_id: 'caro',
+        mode: 'online_1v1',
+        is_ranked: true,
+        season_id: 1,
+        end_reason: 'normal',
+      },
+      participants: [
+        { user_id: 'u1', seat_index: 0, result: 'win', is_bot: false },
+        { user_id: 'u2', seat_index: 1, result: 'loss', is_bot: false },
+      ],
+      currentRatings: {
+        u1: { rating: 1200, gamesPlayed: 20 },
+        u2: { rating: 1200, gamesPlayed: 20 },
+      },
+      configRows: DEFAULT_CONFIG_ROWS,
+      todayPairCount: 0,
+    };
+
+    const dNormal = buildSettlement(baseInput);
+    const dDampened = buildSettlement({ ...baseInput, todayPairCount: 6 });
+    const dTimeout = buildSettlement({
+      ...baseInput,
+      match: { ...baseInput.match, end_reason: 'timeout' },
+    });
+
+    if (!dNormal.is_noop && !dDampened.is_noop && !dTimeout.is_noop) {
+      // Assert rating deltas are identical across all 3 cases
+      assertEquals(dNormal.payload.entries[0].rating_delta, 16);
+      assertEquals(dDampened.payload.entries[0].rating_delta, 16);
+      assertEquals(dTimeout.payload.entries[0].rating_delta, 16);
+
+      assertEquals(dNormal.payload.entries[1].rating_delta, -16);
+      assertEquals(dDampened.payload.entries[1].rating_delta, -16);
+      assertEquals(dTimeout.payload.entries[1].rating_delta, -16);
+    }
   },
 );
