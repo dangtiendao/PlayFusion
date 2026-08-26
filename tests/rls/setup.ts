@@ -156,6 +156,8 @@ export async function teardownRlsTestContext(): Promise<void> {
   }
 }
 
+export const cleanupRlsTestContext = teardownRlsTestContext;
+
 /**
  * Helper khẳng định một thao tác cơ sở dữ liệu BỊ CHẶN bởi RLS / Permission / Trigger.
  */
