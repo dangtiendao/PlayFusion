@@ -40,6 +40,9 @@ const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
 const RoomJoinPage = lazy(() => import('@/pages/RoomJoinPage'));
 const OnlineGamePage = lazy(() => import('@/pages/OnlineGamePage'));
 
+// Ví & Điểm Danh (Phase P4.5c)
+const WalletPage = lazy(() => import('@/pages/WalletPage'));
+
 /**
  * NGUỒN CẤU HÌNH ROUTE DUY NHẤT TOÀN DỰ ÁN
  */
@@ -106,6 +109,16 @@ export const APP_ROUTES: readonly RouteConfig[] = [
       </Suspense>
     ),
     showInNav: true,
+  },
+  {
+    path: '/wallet',
+    label: 'Ví của tôi',
+    element: (
+      <Suspense fallback={<LoadingSpinner message="Đang tải Ví..." />}>
+        <WalletPage />
+      </Suspense>
+    ),
+    showInNav: false,
   },
   {
     path: '/settings',

@@ -50,6 +50,8 @@ export interface MatchSettledData {
   readonly oldRating: number;
   /** Số xu nhận được */
   readonly coins: number;
+  /** Đã đạt trần thưởng xu hôm nay chưa */
+  readonly capped?: boolean;
   /** Bậc rank trước trận */
   readonly tierBefore: TierDef;
   /** Bậc rank sau trận */
@@ -387,6 +389,14 @@ export const MatchEndOverlay: React.FC<MatchEndOverlayProps> = ({
                       className="text-xs font-bold text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-md border border-amber-500/20"
                     >
                       +{settledData.coins} xu 🪙
+                    </span>
+                  )}
+                  {settledData.capped && (
+                    <span
+                      data-testid="coins-capped-text"
+                      className="text-[10px] font-semibold text-amber-300/90 bg-amber-500/10 px-1.5 py-0.5 rounded-md border border-amber-500/20"
+                    >
+                      Đã đạt trần hôm nay
                     </span>
                   )}
                 </div>

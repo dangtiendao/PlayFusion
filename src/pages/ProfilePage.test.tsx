@@ -272,4 +272,12 @@ describe('ProfilePage Component & Stats Integration Tests (ProfilePage.tsx - P2.
     expect(screen.queryByTestId('rank-card-dummy')).toBeNull();
     expect(screen.queryByTestId('rank-card-dummy2')).toBeNull();
   });
+
+  it('11. [P4.5c Wallet Entry] Render nút Ví Của Tôi và hiển thị số dư ví', async () => {
+    await renderProfilePage();
+
+    expect(screen.getByTestId('profile-wallet-btn')).not.toBeNull();
+    expect(screen.getByText('Ví Của Tôi')).not.toBeNull();
+    expect(screen.getByText(/Điểm danh/)).not.toBeNull();
+  });
 });

@@ -9,6 +9,7 @@ import { ConfirmDialog } from '@/components/game-shell/ConfirmDialog';
 import { useSyncOutboxCount } from '@/core/syncOutbox';
 import { getMyGameStats } from '@/repositories/statsRepository';
 import { getMyRecentMatches } from '@/repositories/matchRepository';
+import { walletRepository } from '@/repositories/walletRepository';
 import type { PlayerGameStats, MatchSummary } from '@/repositories/types';
 import { StatsSummary } from '@/components/stats/StatsSummary';
 import { GameStatCard } from '@/components/stats/GameStatCard';
@@ -57,9 +58,10 @@ export function ProfilePage() {
   const [isLinkingGoogle, setIsLinkingGoogle] = useState<boolean>(false);
   const [showSignOutConfirm, setShowSignOutConfirm] = useState<boolean>(false);
 
-  // State dữ liệu Cloud Stats & Lịch sử trận đấu
+  // State dữ liệu Cloud Stats & Lịch sử trận đấu & Số dư Ví
   const [cloudStats, setCloudStats] = useState<PlayerGameStats[]>([]);
   const [recentMatches, setRecentMatches] = useState<MatchSummary[]>([]);
+  const [walletBalance, setWalletBalance] = useState<number>(0);
   const [isLoadingCloud, setIsLoadingCloud] = useState<boolean>(true);
   const [cloudError, setCloudError] = useState<string | null>(null);
 
@@ -84,11 +86,12 @@ export function ProfilePage() {
     [allRegisteredGames],
   );
 
-  // Hàm tải dữ liệu thống kê và lịch sử từ Cloud (Song song Promise.all)
+  // Hàm tải dữ liệu thống kê, lịch sử và ví từ Cloud (Song song Promise.all)
   const fetchCloudData = useCallback(async () => {
     if (!user) {
       setCloudStats([]);
       setRecentMatches([]);
+      setWalletBalance(0);
       setIsLoadingCloud(false);
       return;
     }
@@ -97,12 +100,14 @@ export function ProfilePage() {
     setCloudError(null);
 
     try {
-      const [statsData, matchesData] = await Promise.all([
+      const [statsData, matchesData, bal] = await Promise.all([
         getMyGameStats(),
         getMyRecentMatches(undefined, 10),
+        walletRepository.getMyBalance().catch(() => 0),
       ]);
       setCloudStats(statsData);
       setRecentMatches(matchesData);
+      setWalletBalance(bal);
     } catch {
       setCloudError('Không thể kết nối máy chủ để lấy thống kê mới nhất.');
     } finally {
@@ -287,6 +292,45 @@ export function ProfilePage() {
             <span>Chờ đồng bộ: {pendingSyncCount} trận</span>
           </div>
         )}
+      </section>
+
+      {/* 2b. NÚT VÍ CỦA TÔI & ĐIỂM DANH (PHASE P4.5c) */}
+      <section>
+        <button
+          type="button"
+          data-testid="profile-wallet-btn"
+          onClick={() => {
+            hapticTap();
+            audioManager.playSfx('click');
+            navigate('/wallet');
+          }}
+          className="w-full p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-yellow-500/10 to-amber-500/10 hover:from-amber-500/20 hover:to-yellow-500/20 border border-amber-500/30 transition-all flex items-center justify-between shadow-sm active:scale-[0.99] group text-left"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-xl shadow-inner group-hover:scale-105 transition-transform">
+              🪙
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="text-sm font-bold text-slate-900 dark:text-white">Ví Của Tôi</h4>
+                <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                  Điểm danh nhận xu
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Số dư:{' '}
+                <strong className="text-amber-600 dark:text-amber-400 font-mono font-bold">
+                  {walletBalance.toLocaleString('vi-VN')} xu
+                </strong>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1 text-slate-400 group-hover:text-amber-500 transition-colors text-xs font-bold pr-1">
+            <span>Xem ví</span>
+            <span>→</span>
+          </div>
+        </button>
       </section>
 
       {/* 3. KHỐI TỔNG QUAN THỐNG KÊ (STATSSUMMARY) */}

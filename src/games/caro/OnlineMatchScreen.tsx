@@ -44,6 +44,7 @@ import { useTransportReconnectAttempt } from '@/stores/transportStore';
 import { refereeRepository } from '@/repositories/refereeRepository';
 import { matchRepository } from '@/repositories/matchRepository';
 import { invalidateLeaderboardCache } from '@/repositories/leaderboardRepository';
+import { invalidateWalletCache } from '@/repositories/walletRepository';
 import { useAuthStore } from '@/stores/authStore';
 import { computeOffset, calculateRemainingMs, formatMmSs } from '@/core/serverClock';
 import { hapticTap } from '@/core/haptics';
@@ -392,7 +393,13 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
       if (env.type === 'match_settled') {
         const p = env.payload as {
           matchId: string;
-          deltas?: { userId: string; ratingDelta: number; newRating: number; coins: number }[];
+          deltas?: {
+            userId: string;
+            ratingDelta: number;
+            newRating: number;
+            coins: number;
+            capped?: boolean;
+          }[];
           serverNow?: string;
         };
 
@@ -437,14 +444,16 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
           newRating: myDelta.newRating,
           oldRating,
           coins: myDelta.coins,
+          capped: myDelta.capped,
           tierBefore,
           tierAfter,
           rankChange,
           isShielded,
         });
 
-        // Xóa bộ đệm cache bảng xếp hạng của game này để trang Leaderboard cập nhật mới nhất
+        // Xóa bộ đệm cache bảng xếp hạng của game này và ví xu để cập nhật mới nhất
         invalidateLeaderboardCache('caro');
+        invalidateWalletCache();
       }
     },
     [resyncFromServer, matchId, user?.id],
