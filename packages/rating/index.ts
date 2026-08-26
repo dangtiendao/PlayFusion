@@ -26,3 +26,16 @@ export { type FfaParticipant, type FfaUpdateResult, updateFfa } from './ffa.ts';
 
 // 4. Configuration Parser & Types (Fail-Soft for P4.2 settle_match)
 export { type ParsedEloConfigResult, parseEloConfig } from './config.ts';
+
+// 5. Tier Rules, Mapping Table & Demotion Protection (P4.3a)
+export {
+  type TierId,
+  type TierDef,
+  type TierProgress,
+  type RankViewInput,
+  type RankView,
+  TIER_TABLE,
+  getTierByRating,
+  getTierProgress,
+  resolveRankView,
+} from './tiers.ts';
