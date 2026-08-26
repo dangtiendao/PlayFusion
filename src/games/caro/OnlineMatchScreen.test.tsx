@@ -541,4 +541,208 @@ describe('Caro OnlineMatchScreen Component Tests (P3.3c & P3.4c)', () => {
       expect(mockNavigate).toHaveBeenCalledWith('/');
     });
   });
+
+  it('11. [P4.3c match_settled] Nhận broadcast match_settled -> truyền settledData vào MatchEndOverlay với delta đúng của tôi', async () => {
+    vi.mocked(refereeRepository.initMatch).mockResolvedValueOnce({
+      stateSerialized: serializedEmpty,
+      moveIndex: 0,
+      currentSeat: 0,
+      movesSerialized: '',
+      clock: { '0': 300000, '1': 300000 },
+      turnDeadline: new Date(Date.now() + 300000).toISOString(),
+    });
+
+    renderScreen(0);
+
+    await waitFor(() => {
+      expect(messageHandler).not.toBeNull();
+    });
+
+    // 1. Nhận match_ended trước
+    act(() => {
+      messageHandler?.({
+        v: 1,
+        type: 'match_ended',
+        senderId: 'server',
+        sentAt: new Date().toISOString(),
+        payload: {
+          matchId: 'match-uuid-123',
+          reason: 'normal',
+          outcomes: [
+            { playerIndex: 0, outcome: 'win' },
+            { playerIndex: 1, outcome: 'loss' },
+          ],
+        },
+      });
+    });
+
+    // 2. Nhận match_settled sau
+    act(() => {
+      messageHandler?.({
+        v: 1,
+        type: 'match_settled',
+        senderId: 'server',
+        sentAt: new Date().toISOString(),
+        payload: {
+          matchId: 'match-uuid-123',
+          deltas: [
+            { userId: 'player-anon', ratingDelta: 16, newRating: 1216, coins: 50 },
+            { userId: 'player-2', ratingDelta: -16, newRating: 1184, coins: 5 },
+          ],
+        },
+      });
+    });
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('match-end-overlay')).toBeDefined();
+        expect(screen.getByTestId('rank-settled-card')).toBeDefined();
+        expect(screen.getByTestId('rating-delta-text').textContent).toContain('+16 điểm');
+        expect(screen.getByTestId('coins-reward-text').textContent).toContain('+50 xu');
+      },
+      { timeout: 2000 },
+    );
+  });
+
+  it('12. [P4.3c THĂNG HẠNG & Idempotency] match_settled vượt ngưỡng 1200 -> hiển thị THĂNG HẠNG, broadcast trùng lặp bị bỏ qua', async () => {
+    vi.mocked(refereeRepository.initMatch).mockResolvedValueOnce({
+      stateSerialized: serializedEmpty,
+      moveIndex: 0,
+      currentSeat: 0,
+      movesSerialized: '',
+      clock: { '0': 300000, '1': 300000 },
+      turnDeadline: new Date(Date.now() + 300000).toISOString(),
+    });
+
+    renderScreen(0);
+
+    await waitFor(() => {
+      expect(messageHandler).not.toBeNull();
+    });
+
+    // Nhận match_ended
+    act(() => {
+      messageHandler?.({
+        v: 1,
+        type: 'match_ended',
+        senderId: 'server',
+        sentAt: new Date().toISOString(),
+        payload: {
+          matchId: 'match-uuid-123',
+          reason: 'normal',
+          outcomes: [
+            { playerIndex: 0, outcome: 'win' },
+            { playerIndex: 1, outcome: 'loss' },
+          ],
+        },
+      });
+    });
+
+    // Nhận match_settled lần 1 (1195 -> 1211: Thăng hạng Vàng)
+    act(() => {
+      messageHandler?.({
+        v: 1,
+        type: 'match_settled',
+        senderId: 'server',
+        sentAt: new Date().toISOString(),
+        payload: {
+          matchId: 'match-uuid-123',
+          deltas: [
+            { userId: 'player-anon', ratingDelta: 16, newRating: 1211, coins: 50 },
+            { userId: 'player-2', ratingDelta: -16, newRating: 1184, coins: 5 },
+          ],
+        },
+      });
+    });
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('rank-up-banner')).toBeDefined();
+        expect(screen.getByText('🌟 THĂNG HẠNG! 🌟')).toBeDefined();
+      },
+      { timeout: 2000 },
+    );
+
+    // Nhận lại cùng broadcast match_settled lần 2 (giả lập trùng lặp)
+    act(() => {
+      messageHandler?.({
+        v: 1,
+        type: 'match_settled',
+        senderId: 'server',
+        sentAt: new Date().toISOString(),
+        payload: {
+          matchId: 'match-uuid-123',
+          deltas: [
+            { userId: 'player-anon', ratingDelta: 16, newRating: 1211, coins: 50 },
+            { userId: 'player-2', ratingDelta: -16, newRating: 1184, coins: 5 },
+          ],
+        },
+      });
+    });
+
+    // Không crash, overlay vẫn giữ trạng thái ổn định
+    expect(screen.getByTestId('rank-up-banner')).toBeDefined();
+  });
+
+  it('13. [P4.3c KHIÊN BẢO VỆ] match_settled rớt ngưỡng lần đầu (1205 -> 1189) -> hiển thị thông điệp khiên bảo vệ', async () => {
+    vi.mocked(refereeRepository.initMatch).mockResolvedValueOnce({
+      stateSerialized: serializedEmpty,
+      moveIndex: 0,
+      currentSeat: 0,
+      movesSerialized: '',
+      clock: { '0': 300000, '1': 300000 },
+      turnDeadline: new Date(Date.now() + 300000).toISOString(),
+    });
+
+    renderScreen(0);
+
+    await waitFor(() => {
+      expect(messageHandler).not.toBeNull();
+    });
+
+    // Nhận match_ended (thua)
+    act(() => {
+      messageHandler?.({
+        v: 1,
+        type: 'match_ended',
+        senderId: 'server',
+        sentAt: new Date().toISOString(),
+        payload: {
+          matchId: 'match-uuid-123',
+          reason: 'normal',
+          outcomes: [
+            { playerIndex: 1, outcome: 'win' },
+            { playerIndex: 0, outcome: 'loss' },
+          ],
+        },
+      });
+    });
+
+    // Nhận match_settled (1205 -> 1189)
+    act(() => {
+      messageHandler?.({
+        v: 1,
+        type: 'match_settled',
+        senderId: 'server',
+        sentAt: new Date().toISOString(),
+        payload: {
+          matchId: 'match-uuid-123',
+          deltas: [
+            { userId: 'player-anon', ratingDelta: -16, newRating: 1189, coins: 5 },
+            { userId: 'player-2', ratingDelta: 16, newRating: 1221, coins: 50 },
+          ],
+        },
+      });
+    });
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('demotion-shield-message')).toBeDefined();
+        expect(
+          screen.getByText(/Được bảo vệ rớt hạng — thắng trận sau để giữ Vàng!/),
+        ).toBeDefined();
+      },
+      { timeout: 2000 },
+    );
+  });
 });

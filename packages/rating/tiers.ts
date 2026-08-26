@@ -322,3 +322,32 @@ export function resolveRankView(input: RankViewInput): RankView {
     displayTier,
   };
 }
+
+/**
+ * So sánh thứ bậc giữa hai Bậc xếp hạng (`TierDef` hoặc `TierId`).
+ *
+ * @param a Bậc rank thứ nhất (TierDef hoặc TierId).
+ * @param b Bậc rank thứ hai (TierDef hoặc TierId).
+ * @returns
+ * - Số dương (> 0) nếu bậc `a` cao hơn bậc `b` (ví dụ: Vàng > Bạc).
+ * - Số âm (< 0) nếu bậc `a` thấp hơn bậc `b` (ví dụ: Đồng < Bạc).
+ * - 0 nếu hai bậc bằng nhau (`a` và `b` cùng bậc).
+ *
+ * @throws {RangeError} Nếu một trong hai mã TierId không tồn tại trong `TIER_TABLE`.
+ */
+export function compareTiers(a: TierDef | TierId, b: TierDef | TierId): number {
+  const idA = typeof a === 'string' ? a : a.id;
+  const idB = typeof b === 'string' ? b : b.id;
+
+  const indexA = TIER_TABLE.findIndex((t) => t.id === idA);
+  const indexB = TIER_TABLE.findIndex((t) => t.id === idB);
+
+  if (indexA === -1) {
+    throw new RangeError(`Mã bậc xếp hạng không hợp lệ: ${idA}`);
+  }
+  if (indexB === -1) {
+    throw new RangeError(`Mã bậc xếp hạng không hợp lệ: ${idB}`);
+  }
+
+  return indexA - indexB;
+}

@@ -272,4 +272,205 @@ describe('MatchEndOverlay Component Tests (MatchEndOverlay.tsx - P1.5a)', () => 
     expect(screen.getByText(/6/)).not.toBeNull();
     expect(screen.getByText(/Chuỗi 4/)).not.toBeNull();
   });
+
+  it('7. [P4.3c Rank Settled] Hiển thị khối rank khi có settledData: delta +16, +50 xu, counter rating', () => {
+    const mockReport: MatchResultReport = {
+      gameId: 'caro',
+      mode: 'online_1v1',
+      durationMs: 45000,
+      participants: [
+        { playerIndex: 0, outcome: 'win' },
+        { playerIndex: 1, outcome: 'loss' },
+      ],
+    };
+
+    render(
+      <MatchEndOverlay
+        report={mockReport}
+        matchConfig={{ mode: 'online_1v1', humanSeat: 0 }}
+        moveCount={20}
+        settledData={{
+          ratingDelta: 16,
+          newRating: 1216,
+          oldRating: 1200,
+          coins: 50,
+          tierBefore: { id: 'gold', name: 'Vàng', minRating: 1200, maxRating: 1399 },
+          tierAfter: { id: 'gold', name: 'Vàng', minRating: 1200, maxRating: 1399 },
+          rankChange: 'same',
+        }}
+        onRestart={mockOnRestart}
+        onBackToSetup={mockOnBackToSetup}
+        onExit={mockOnExit}
+        shellApi={mockShellApi}
+      />,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+
+    expect(screen.getByTestId('rank-settled-card')).not.toBeNull();
+    expect(screen.getByTestId('rating-delta-text').textContent).toContain('+16 điểm');
+    expect(screen.getByTestId('coins-reward-text').textContent).toContain('+50 xu');
+    expect(screen.getByTestId('animated-rating-text')).not.toBeNull();
+    expect(screen.queryByTestId('rank-up-banner')).toBeNull();
+  });
+
+  it('8. [P4.3c THĂNG HẠNG] rankChange: up -> Hiển thị banner THĂNG HẠNG, confetti và badge bậc mới', () => {
+    const mockReport: MatchResultReport = {
+      gameId: 'caro',
+      mode: 'online_1v1',
+      durationMs: 60000,
+      participants: [
+        { playerIndex: 0, outcome: 'win' },
+        { playerIndex: 1, outcome: 'loss' },
+      ],
+    };
+
+    render(
+      <MatchEndOverlay
+        report={mockReport}
+        matchConfig={{ mode: 'online_1v1', humanSeat: 0 }}
+        moveCount={25}
+        settledData={{
+          ratingDelta: 16,
+          newRating: 1211,
+          oldRating: 1195,
+          coins: 50,
+          tierBefore: { id: 'silver', name: 'Bạc', minRating: 1000, maxRating: 1199 },
+          tierAfter: { id: 'gold', name: 'Vàng', minRating: 1200, maxRating: 1399 },
+          rankChange: 'up',
+        }}
+        onRestart={mockOnRestart}
+        onBackToSetup={mockOnBackToSetup}
+        onExit={mockOnExit}
+        shellApi={mockShellApi}
+      />,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+
+    expect(screen.getByTestId('rank-up-banner')).not.toBeNull();
+    expect(screen.getByText('🌟 THĂNG HẠNG! 🌟')).not.toBeNull();
+    expect(screen.getByTestId('confetti-container')).not.toBeNull();
+    expect(mockShellApi.playSfx).toHaveBeenCalledWith('success');
+  });
+
+  it('9. [P4.3c KHIÊN BẢO VỆ] rankChange: down + isShielded: true -> Hiển thị thông điệp khiên bảo vệ', () => {
+    const mockReport: MatchResultReport = {
+      gameId: 'caro',
+      mode: 'online_1v1',
+      durationMs: 40000,
+      participants: [
+        { playerIndex: 0, outcome: 'loss' },
+        { playerIndex: 1, outcome: 'win' },
+      ],
+    };
+
+    render(
+      <MatchEndOverlay
+        report={mockReport}
+        matchConfig={{ mode: 'online_1v1', humanSeat: 0 }}
+        moveCount={19}
+        settledData={{
+          ratingDelta: -16,
+          newRating: 1189,
+          oldRating: 1205,
+          coins: 5,
+          tierBefore: { id: 'gold', name: 'Vàng', minRating: 1200, maxRating: 1399 },
+          tierAfter: { id: 'silver', name: 'Bạc', minRating: 1000, maxRating: 1199 },
+          rankChange: 'down',
+          isShielded: true,
+        }}
+        onRestart={mockOnRestart}
+        onBackToSetup={mockOnBackToSetup}
+        onExit={mockOnExit}
+        shellApi={mockShellApi}
+      />,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+
+    expect(screen.getByTestId('demotion-shield-message')).not.toBeNull();
+    expect(screen.getByText(/Được bảo vệ rớt hạng — thắng trận sau để giữ Vàng!/)).not.toBeNull();
+    expect(screen.queryByTestId('demotion-message')).toBeNull();
+  });
+
+  it('10. [P4.3c RỚT HẠNG THẬT] rankChange: down + isShielded: false -> Hiển thị dòng xuống hạng nhẹ nhàng', () => {
+    const mockReport: MatchResultReport = {
+      gameId: 'caro',
+      mode: 'online_1v1',
+      durationMs: 40000,
+      participants: [
+        { playerIndex: 0, outcome: 'loss' },
+        { playerIndex: 1, outcome: 'win' },
+      ],
+    };
+
+    render(
+      <MatchEndOverlay
+        report={mockReport}
+        matchConfig={{ mode: 'online_1v1', humanSeat: 0 }}
+        moveCount={21}
+        settledData={{
+          ratingDelta: -16,
+          newRating: 1173,
+          oldRating: 1189,
+          coins: 5,
+          tierBefore: { id: 'silver', name: 'Bạc', minRating: 1000, maxRating: 1199 },
+          tierAfter: { id: 'silver', name: 'Bạc', minRating: 1000, maxRating: 1199 },
+          rankChange: 'down',
+          isShielded: false,
+        }}
+        onRestart={mockOnRestart}
+        onBackToSetup={mockOnBackToSetup}
+        onExit={mockOnExit}
+        shellApi={mockShellApi}
+      />,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+
+    expect(screen.getByTestId('demotion-message')).not.toBeNull();
+    expect(screen.getByText(/Xuống hạng Bạc — cố lên!/)).not.toBeNull();
+    expect(screen.queryByTestId('demotion-shield-message')).toBeNull();
+  });
+
+  it('11. [P4.3c Unranked / Abort] Ván unranked (settledData = null) hoặc abort -> KHÔNG có khối rank', () => {
+    const mockReport: MatchResultReport = {
+      gameId: 'caro',
+      mode: 'online_1v1',
+      durationMs: 10000,
+      participants: [
+        { playerIndex: 0, outcome: 'draw' },
+        { playerIndex: 1, outcome: 'draw' },
+      ],
+    };
+
+    render(
+      <MatchEndOverlay
+        report={mockReport}
+        matchConfig={{ mode: 'online_1v1', humanSeat: 0 }}
+        moveCount={2}
+        endReason="abort"
+        settledData={null}
+        onRestart={mockOnRestart}
+        onBackToSetup={mockOnBackToSetup}
+        onExit={mockOnExit}
+        shellApi={mockShellApi}
+      />,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+
+    expect(screen.queryByTestId('rank-settled-card')).toBeNull();
+  });
 });

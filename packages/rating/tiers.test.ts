@@ -18,7 +18,9 @@ import {
   getTierByRating,
   getTierProgress,
   resolveRankView,
+  compareTiers,
   type RankViewInput,
+  type TierId,
 } from './tiers.ts';
 
 // PRNG mulberry32 deterministic 100% cho property test
@@ -366,5 +368,43 @@ describe('5. Property Tests: Tính Liền Mạch & Bất Biến Của Bảng Án
       expect(progress.percent).toBeLessThanOrEqual(100);
       expect(progress.pointsInTier).toBe(randomRating - tier.minRating);
     }
+  });
+
+  describe('6. Kiểm Thử compareTiers (So sánh thứ bậc rank - P4.3c)', () => {
+    it('6.1 So sánh bằng chuỗi TierId: Bậc cao hơn trả về > 0, bậc thấp hơn trả về < 0, cùng bậc trả về 0', () => {
+      expect(compareTiers('gold', 'silver')).toBeGreaterThan(0);
+      expect(compareTiers('bronze', 'diamond')).toBeLessThan(0);
+      expect(compareTiers('master', 'master')).toBe(0);
+      expect(compareTiers('platinum', 'platinum')).toBe(0);
+      expect(compareTiers('master', 'bronze')).toBeGreaterThan(0);
+    });
+
+    it('6.2 So sánh bằng đối tượng TierDef và hỗn hợp (TierDef vs TierId)', () => {
+      const bronzeDef = getTierByRating(800);
+      const goldDef = getTierByRating(1300);
+      const masterDef = getTierByRating(2000);
+
+      expect(compareTiers(goldDef, bronzeDef)).toBeGreaterThan(0);
+      expect(compareTiers(bronzeDef, masterDef)).toBeLessThan(0);
+      expect(compareTiers(goldDef, 'gold')).toBe(0);
+      expect(compareTiers('master', goldDef)).toBeGreaterThan(0);
+    });
+
+    it('6.3 Kiểm thử biên: Bậc liền kề và bậc xa nhất', () => {
+      expect(compareTiers('silver', 'bronze')).toBe(1);
+      expect(compareTiers('gold', 'silver')).toBe(1);
+      expect(compareTiers('platinum', 'gold')).toBe(1);
+      expect(compareTiers('diamond', 'platinum')).toBe(1);
+      expect(compareTiers('master', 'diamond')).toBe(1);
+
+      // Đi lùi
+      expect(compareTiers('bronze', 'master')).toBe(-5);
+      expect(compareTiers('master', 'bronze')).toBe(5);
+    });
+
+    it('6.4 Mã TierId không hợp lệ -> ném RangeError', () => {
+      expect(() => compareTiers('invalid' as unknown as TierId, 'gold')).toThrow(RangeError);
+      expect(() => compareTiers('gold', 'unknown' as unknown as TierId)).toThrow(RangeError);
+    });
   });
 });

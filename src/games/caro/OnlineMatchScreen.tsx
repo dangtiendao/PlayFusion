@@ -46,6 +46,8 @@ import { matchRepository } from '@/repositories/matchRepository';
 import { useAuthStore } from '@/stores/authStore';
 import { computeOffset, calculateRemainingMs, formatMmSs } from '@/core/serverClock';
 import { hapticTap } from '@/core/haptics';
+import { getTierByRating, compareTiers, resolveRankView, PLACEMENT_GAMES_DEFAULT } from '@rating';
+import type { MatchSettledData } from './components/MatchEndOverlay';
 
 /** Thời gian debounce (5 giây) trước khi kết luận đối thủ đã rời presence (P3.5c) */
 const OPPONENT_AWAY_DEBOUNCE_MS = 5000;
@@ -108,6 +110,10 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
   const [endReason, setEndReason] = useState<string>('normal');
   const [winnerSeat, setWinnerSeat] = useState<number | null>(null);
   const [winLine, setWinLine] = useState<readonly number[] | null>(null);
+
+  // Trạng thái kết toán xếp hạng từ broadcast match_settled (P4.3c)
+  const [settledData, setSettledData] = useState<MatchSettledData | null>(null);
+  const processedSettledMatchIdRef = useRef<string | null>(null);
 
   // Thông tin đối thủ & Toast đồng bộ
   const [opponentName, setOpponentName] = useState<string>('Đối thủ');
@@ -376,20 +382,80 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
           const winOutcome = p.outcomes.find((o) => o.outcome === 'win');
           setWinnerSeat(winOutcome ? winOutcome.playerIndex : null);
         }
+        return;
+      }
+
+      // ------------------------------------------------------------------------
+      // SỰ KIỆN: 'match_settled' (P4.3c - Kết toán xếp hạng & Biến động điểm)
+      // ------------------------------------------------------------------------
+      if (env.type === 'match_settled') {
+        const p = env.payload as {
+          matchId: string;
+          deltas?: { userId: string; ratingDelta: number; newRating: number; coins: number }[];
+          serverNow?: string;
+        };
+
+        if (!p || p.matchId !== matchId) return;
+
+        // CHỐNG ÁP 2 LẦN (IDEMPOTENCY): Broadcast trùng lặp cho cùng matchId sẽ bị bỏ qua
+        if (processedSettledMatchIdRef.current === p.matchId) {
+          return;
+        }
+        processedSettledMatchIdRef.current = p.matchId;
+
+        // Tìm delta của người chơi hiện tại (lọc theo auth userId)
+        const myUserId = user?.id || 'player-anon';
+        const myDelta = p.deltas?.find((d) => d.userId === myUserId);
+        if (!myDelta) return;
+
+        // Tính toán chuyển bậc (oldRating -> newRating)
+        const oldRating = myDelta.newRating - myDelta.ratingDelta;
+        const tierBefore = getTierByRating(oldRating);
+        const tierAfter = getTierByRating(myDelta.newRating);
+        const comparison = compareTiers(tierAfter, tierBefore);
+        const rankChange: 'up' | 'down' | 'same' =
+          comparison > 0 ? 'up' : comparison < 0 ? 'down' : 'same';
+
+        // Kiểm tra Khiên bảo vệ rớt hạng (Demotion Shield Rule)
+        let isShielded = false;
+        if (rankChange === 'down') {
+          const rankView = resolveRankView({
+            rating: myDelta.newRating,
+            gamesPlayed: 15,
+            placementGames: PLACEMENT_GAMES_DEFAULT,
+            lastMatch: {
+              ratingBefore: oldRating,
+              ratingAfter: myDelta.newRating,
+            },
+          });
+          isShielded = rankView.kind === 'ranked' && rankView.shield === true;
+        }
+
+        setSettledData({
+          ratingDelta: myDelta.ratingDelta,
+          newRating: myDelta.newRating,
+          oldRating,
+          coins: myDelta.coins,
+          tierBefore,
+          tierAfter,
+          rankChange,
+          isShielded,
+        });
       }
     },
-    [resyncFromServer],
+    [resyncFromServer, matchId, user?.id],
   );
 
   // 5. KẾT NỐI REALTIME TRANSPORT QUA USEMATCHCHANNEL (P3.5a ĐẤU NỐI ONRECONNECTED)
+  // Duy trì kết nối khi kết thúc ván để nhận broadcast 'match_settled' gửi ngay sau 'match_ended'
   const {
     status: transportStatus,
     members,
     reconnect,
   } = useMatchChannel({
-    matchId: isGameOver ? null : matchId,
+    matchId,
     self: selfMember,
-    enabled: !loading && !isGameOver,
+    enabled: !loading,
     onMessage: handleRealtimeMessage,
     onReconnected: () => {
       setResyncToast('Đã kết nối lại máy chủ');
@@ -936,6 +1002,7 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
             matchConfig={{ mode: 'online_1v1', humanSeat: mySeat }}
             moveCount={moveIndex}
             endReason={endReason}
+            settledData={settledData}
             sessionScore={{
               player1Wins: winnerSeat === 0 ? 1 : 0,
               player2Wins: winnerSeat === 1 ? 1 : 0,
