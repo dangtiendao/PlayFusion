@@ -10,7 +10,9 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
+      "@engines": ["packages/engines/index.ts"],
       "@engines/*": ["packages/engines/*"],
+      "@rating": ["packages/rating/index.ts"],
       "@rating/*": ["packages/rating/*"]
     }
   },

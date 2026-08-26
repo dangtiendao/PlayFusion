@@ -16,6 +16,7 @@ export {
   type MatchScore,
   type PairUpdateResult,
   DEFAULT_ELO_CONFIG,
+  PLACEMENT_GAMES_DEFAULT,
 } from './types.ts';
 
 // 2. 1v1 Core Elo Functions

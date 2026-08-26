@@ -14,6 +14,7 @@ import { StatsSummary } from '@/components/stats/StatsSummary';
 import { GameStatCard } from '@/components/stats/GameStatCard';
 import { MatchHistoryList } from '@/components/stats/MatchHistoryList';
 import { ActiveMatchBanner } from '@/components/ActiveMatchBanner';
+import { RankCard, useMyRankViews } from '@/components/rank';
 
 /**
  * ==============================================================================
@@ -61,6 +62,9 @@ export function ProfilePage() {
   const [recentMatches, setRecentMatches] = useState<MatchSummary[]>([]);
   const [isLoadingCloud, setIsLoadingCloud] = useState<boolean>(true);
   const [cloudError, setCloudError] = useState<string | null>(null);
+
+  // Dữ liệu Rank Views cho từng game ranked (P4.3b)
+  const { rankViews, isLoading: isLoadingRank, error: rankError } = useMyRankViews();
 
   // State đóng/mở khối thành tích cục bộ (Collapsible local stats)
   const [isLocalStatsOpen, setIsLocalStatsOpen] = useState<boolean>(false);
@@ -318,13 +322,25 @@ export function ProfilePage() {
 
         <div className="space-y-4" data-testid="games-stat-list">
           {allRegisteredGames.map((game) => (
-            <GameStatCard
-              key={game.definition.id}
-              definition={game.definition}
-              stats={cloudStatsMap.get(game.definition.id) ?? null}
-              onPlay={() => navigate(`/game/${game.definition.id}`)}
-              isLoading={isLoadingCloud}
-            />
+            <div key={game.definition.id} className="space-y-3">
+              {/* Thẻ Rank (Chỉ hiển thị cho game có ranked=true, ẩn nhẹ khi lỗi mạng theo nguyên tắc Offline-First) */}
+              {game.definition.ranked && !rankError && (
+                <RankCard
+                  definition={game.definition}
+                  rankView={rankViews[game.definition.id] ?? null}
+                  onPlay={() => navigate(`/game/${game.definition.id}`)}
+                  isLoading={isLoadingRank}
+                />
+              )}
+
+              {/* Thẻ Thống Kê Thành Tích Thắng/Thua/Chuỗi */}
+              <GameStatCard
+                definition={game.definition}
+                stats={cloudStatsMap.get(game.definition.id) ?? null}
+                onPlay={() => navigate(`/game/${game.definition.id}`)}
+                isLoading={isLoadingCloud}
+              />
+            </div>
           ))}
         </div>
       </section>

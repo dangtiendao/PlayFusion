@@ -63,6 +63,12 @@ export interface EloConfig {
 }
 
 /**
+ * Số trận đấu yêu cầu mặc định trong giai đoạn định hạng (placement games).
+ * Giá trị này đồng bộ với key `elo.placement_games` trong DB `system_config` (mặc định: 15).
+ */
+export const PLACEMENT_GAMES_DEFAULT = 15;
+
+/**
  * Cấu hình Elo mặc định dùng làm giá trị dự phòng (fallback)
  * khi cấu hình DB `system_config` bị thiếu hoặc lỗi kết nối.
  *
@@ -73,7 +79,7 @@ export const DEFAULT_ELO_CONFIG: EloConfig = Object.freeze({
   kNormal: 32,
   kHigh: 16,
   highRatingThreshold: 2000,
-  placementGames: 15,
+  placementGames: PLACEMENT_GAMES_DEFAULT,
   mismatchThreshold: 400,
   mismatchDampen: 0.5,
 });
