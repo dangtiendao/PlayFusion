@@ -603,25 +603,26 @@ export async function executeSettlement(
     if (resData?.applied === true) {
       // 7. PHÁT SÓNG REALTIME 'match_settled' (SAU 'match_ended')
       const rpcEntries = Array.isArray(resData.entries) ? resData.entries : [];
-      const appliedCoinsMap = new Map<string, number>();
+      const appliedEntryMap = new Map<string, { coins: number; capped: boolean }>();
       for (const re of rpcEntries) {
-        if (
-          re &&
-          typeof re === 'object' &&
-          'user_id' in re &&
-          'coins_applied' in re &&
-          typeof re.user_id === 'string'
-        ) {
-          appliedCoinsMap.set(re.user_id, Number(re.coins_applied));
+        if (re && typeof re === 'object' && 'user_id' in re && typeof re.user_id === 'string') {
+          appliedEntryMap.set(re.user_id, {
+            coins: Number((re as { coins_applied?: unknown }).coins_applied ?? 0),
+            capped: Boolean((re as { capped?: unknown }).capped),
+          });
         }
       }
 
-      const deltas = decision.payload.entries.map((e) => ({
-        userId: e.user_id,
-        ratingDelta: e.rating_delta,
-        newRating: e.rating_after,
-        coins: appliedCoinsMap.get(e.user_id) ?? e.coins,
-      }));
+      const deltas = decision.payload.entries.map((e) => {
+        const applied = appliedEntryMap.get(e.user_id);
+        return {
+          userId: e.user_id,
+          ratingDelta: e.rating_delta,
+          newRating: e.rating_after,
+          coins: applied ? applied.coins : e.coins,
+          capped: applied ? applied.capped : false,
+        };
+      });
 
       const nowIso = new Date().toISOString();
       await broadcast(matchId, 'match_settled', {

@@ -473,4 +473,45 @@ describe('MatchEndOverlay Component Tests (MatchEndOverlay.tsx - P1.5a)', () => 
 
     expect(screen.queryByTestId('rank-settled-card')).toBeNull();
   });
+
+  it('12. [P4.5c Capped Reward] Khi chạm trần thưởng ngày (capped = true) -> Hiển thị "Đã đạt trần hôm nay"', () => {
+    const mockReport: MatchResultReport = {
+      gameId: 'caro',
+      mode: 'online_1v1',
+      durationMs: 40000,
+      participants: [
+        { playerIndex: 0, outcome: 'win' },
+        { playerIndex: 1, outcome: 'loss' },
+      ],
+    };
+
+    render(
+      <MatchEndOverlay
+        report={mockReport}
+        matchConfig={{ mode: 'online_1v1', humanSeat: 0 }}
+        moveCount={20}
+        settledData={{
+          ratingDelta: 16,
+          newRating: 1250,
+          oldRating: 1234,
+          coins: 0,
+          capped: true,
+          tierBefore: { id: 'silver', name: 'Bạc', minRating: 1000, maxRating: 1199 },
+          tierAfter: { id: 'silver', name: 'Bạc', minRating: 1000, maxRating: 1199 },
+          rankChange: 'same',
+        }}
+        onRestart={mockOnRestart}
+        onBackToSetup={mockOnBackToSetup}
+        onExit={mockOnExit}
+        shellApi={mockShellApi}
+      />,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+
+    expect(screen.getByTestId('coins-capped-text')).not.toBeNull();
+    expect(screen.getByText('Đã đạt trần hôm nay')).not.toBeNull();
+  });
 });
