@@ -346,3 +346,53 @@ export interface RecentDecayLog {
   /** Thời điểm trừ điểm (ISO 8601 string) */
   readonly createdAt: string;
 }
+
+/**
+ * Bản ghi kỳ thủ trên Bảng Cao Thủ Toàn Hệ Thống (Matview `mv_leaderboard_masters` - P4.7b).
+ */
+export interface MasterEntry {
+  /** Thứ hạng trên bảng xếp hạng (1..100) */
+  readonly rank: number;
+  /** UUID của người chơi */
+  readonly userId: string;
+  /** Tên hiển thị */
+  readonly displayName: string;
+  /** Đường dẫn ảnh đại diện */
+  readonly avatarUrl: string | null;
+  /** Điểm Elo trung bình có trọng số theo số ván: ROUND(SUM(rating * games_played) / SUM(games_played)) */
+  readonly weightedRating: number;
+  /** Số lượng trò chơi đã hoàn thành định hạng (>= 10 ván) */
+  readonly gamesCount: number;
+  /** Tổng số ván đã chơi trong các trò chơi đã định hạng */
+  readonly totalGames: number;
+  /** Điểm Elo cao nhất trong các game của người chơi */
+  readonly bestTierRating?: number;
+}
+
+/**
+ * Bản ghi người chơi trên Bảng Chăm Chỉ Toàn Hệ Thống (Matview `mv_leaderboard_grinders` - P4.7b).
+ */
+export interface GrinderEntry {
+  /** Thứ hạng trên bảng xếp hạng (1..100) */
+  readonly rank: number;
+  /** UUID của người chơi */
+  readonly userId: string;
+  /** Tên hiển thị */
+  readonly displayName: string;
+  /** Đường dẫn ảnh đại diện */
+  readonly avatarUrl: string | null;
+  /** Tổng số xu kiếm được từ thi đấu trong mùa giải active */
+  readonly earnedCoins: number;
+  /** Tổng số ván đấu nhận thưởng trong mùa giải active */
+  readonly totalMatches: number;
+}
+
+/**
+ * Thứ hạng cá nhân của người dùng trên Bảng Xếp Hạng Toàn Hệ Thống (P4.7b).
+ * - `rank`: Thứ hạng (1..n) hoặc `null` nếu người dùng chưa có mặt trên bảng (ví dụ: chưa định hạng game nào ở bảng Cao Thủ hoặc chưa kiếm xu nào ở bảng Chăm Chỉ).
+ * - `value`: Giá trị điểm xếp hạng tương ứng (`weightedRating` ở bảng Cao Thủ, `earnedCoins` ở bảng Chăm Chỉ) hoặc `null` nếu không có mặt.
+ */
+export interface MyGlobalRank {
+  readonly rank: number | null;
+  readonly value: number | null;
+}

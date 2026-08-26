@@ -44,6 +44,7 @@ import { useTransportReconnectAttempt } from '@/stores/transportStore';
 import { refereeRepository } from '@/repositories/refereeRepository';
 import { matchRepository } from '@/repositories/matchRepository';
 import { invalidateLeaderboardCache } from '@/repositories/leaderboardRepository';
+import { invalidateGlobalLeaderboard } from '@/repositories/globalLeaderboardRepository';
 import { invalidateWalletCache } from '@/repositories/walletRepository';
 import { useAuthStore } from '@/stores/authStore';
 import { computeOffset, calculateRemainingMs, formatMmSs } from '@/core/serverClock';
@@ -451,8 +452,9 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
           isShielded,
         });
 
-        // Xóa bộ đệm cache bảng xếp hạng của game này và ví xu để cập nhật mới nhất
+        // Xóa bộ đệm cache bảng xếp hạng của game này, bảng xếp hạng toàn hệ và ví xu
         invalidateLeaderboardCache('caro');
+        invalidateGlobalLeaderboard();
         invalidateWalletCache();
       }
     },
