@@ -98,15 +98,37 @@ describe('RankCard Component Tests', () => {
 
   it('5. Nhánh 3 (null - Chưa đấu ranked): Render thông báo và nút Đấu Ngay', () => {
     const handlePlay = vi.fn();
+
     render(<RankCard definition={rankedGameDef} rankView={null} onPlay={handlePlay} />);
 
     expect(screen.getByTestId('unranked-badge')).toHaveTextContent('Chưa có hạng');
-    expect(screen.getByText(/Chưa có thành tích ranked mùa này/)).toBeInTheDocument();
+    expect(screen.getByText('Chưa có thành tích ranked mùa này.')).toBeInTheDocument();
 
     const playBtn = screen.getByTestId('rank-play-btn');
     expect(playBtn).toBeInTheDocument();
-
     fireEvent.click(playBtn);
     expect(handlePlay).toHaveBeenCalledTimes(1);
+  });
+
+  it('6. Cảnh báo Decay: Render dòng thông báo bị trừ điểm khi có decayInfo', () => {
+    const rankView = resolveRankView({
+      rating: 1690,
+      gamesPlayed: 25,
+      placementGames: PLACEMENT_GAMES_DEFAULT,
+      lastMatch: null,
+    });
+
+    render(
+      <RankCard
+        definition={rankedGameDef}
+        rankView={rankView}
+        decayInfo={{ points: 10, weekKey: '2026-35' }}
+      />,
+    );
+
+    const decayWarning = screen.getByTestId('rank-decay-warning');
+    expect(decayWarning).toBeInTheDocument();
+    expect(decayWarning).toHaveTextContent('-10 điểm');
+    expect(decayWarning).toHaveTextContent('không hoạt động');
   });
 });

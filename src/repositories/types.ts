@@ -300,3 +300,49 @@ export interface MyLeaderboardRank {
    */
   readonly eligible: boolean;
 }
+
+/**
+ * Huy hiệu vĩnh viễn ghi nhận thành tích mùa giải của người chơi (bảng `user_season_badges` - P4.6a/d).
+ */
+export interface SeasonBadge {
+  /** ID định danh duy nhất (UUID) của huy hiệu */
+  readonly id: string;
+  /** Mã số mùa giải (ví dụ: 1, 2) */
+  readonly seasonId: number;
+  /** Tên hiển thị của mùa giải (ví dụ: 'Mùa 1 - Khởi Nguyên') */
+  readonly seasonName: string;
+  /** Mã trò chơi (ví dụ: 'caro') */
+  readonly gameId: string;
+  /** Điểm Elo tại thời điểm đóng mùa */
+  readonly finalRating: number;
+  /** Bậc xếp hạng chốt mùa ('bronze' | 'silver' | 'gold' | 'platinum' | 'diamond' | 'master') */
+  readonly finalTier: string;
+  /** Thứ hạng trên Bảng Vàng (null nếu < 10 trận) */
+  readonly finalRank: number | null;
+  /** Tổng số ván đã thi đấu trong mùa */
+  readonly gamesPlayed: number;
+  /** Số ván thắng */
+  readonly wins: number;
+  /** Số ván thua */
+  readonly losses: number;
+  /** Số ván hòa */
+  readonly draws: number;
+  /** Thời điểm cấp huy hiệu (ISO 8601 string) */
+  readonly createdAt: string;
+}
+
+/**
+ * Thông tin đợt trừ điểm bỏ đấu (Rating Decay) gần nhất của người chơi (bảng `rating_decay_log` - P4.6c/d).
+ */
+export interface RecentDecayLog {
+  /** Số điểm đã bị trừ trong tuần */
+  readonly points: number;
+  /** Khóa tuần ISO (ví dụ: '2026-35') */
+  readonly weekKey: string;
+  /** Điểm số trước khi decay */
+  readonly ratingBefore: number;
+  /** Điểm số sau khi decay */
+  readonly ratingAfter: number;
+  /** Thời điểm trừ điểm (ISO 8601 string) */
+  readonly createdAt: string;
+}

@@ -39,6 +39,11 @@ export interface RankCardProps {
   readonly rating?: number;
 
   /**
+   * Thông tin trừ điểm bỏ đấu (Rating Decay) gần đây nếu có (P4.6c/d).
+   */
+  readonly decayInfo?: { points: number; weekKey?: string } | null;
+
+  /**
    * Callback khi nhấn nút Chơi / Đấu Xếp Hạng.
    */
   readonly onPlay?: () => void;
@@ -57,6 +62,7 @@ export interface RankCardProps {
 export const RankCard: React.FC<RankCardProps> = ({
   definition,
   rankView,
+  decayInfo,
   onPlay,
   isLoading = false,
   className = '',
@@ -147,6 +153,19 @@ export const RankCard: React.FC<RankCardProps> = ({
             </span>
           </div>
           <RankProgressBar progress={rankView.progress} />
+
+          {/* Dòng cảnh báo trừ điểm Decay nếu có */}
+          {decayInfo && decayInfo.points > 0 && (
+            <div
+              data-testid="rank-decay-warning"
+              className="flex items-center gap-1.5 p-2 rounded-xl bg-amber-500/10 border border-amber-500/25 text-[11px] font-medium text-amber-800 dark:text-amber-300"
+            >
+              <span>⚠️</span>
+              <span>
+                Đã bị trừ <strong>-{decayInfo.points} điểm</strong> tuần này do không hoạt động.
+              </span>
+            </div>
+          )}
         </div>
       )}
 

@@ -8,6 +8,9 @@ import * as statsRepoModule from '../repositories/statsRepository';
 import * as matchRepoModule from '../repositories/matchRepository';
 import * as gameLocalDataModule from '../core/gameLocalData';
 import * as syncOutboxModule from '../core/syncOutbox';
+import * as catalogRepoModule from '../repositories/catalogRepository';
+import { walletRepository } from '../repositories/walletRepository';
+import { seasonRepository } from '../repositories/seasonRepository';
 import { getAllGames } from '@/games/registry';
 
 describe('ProfilePage Component & Stats Integration Tests (ProfilePage.tsx - P2.6c)', () => {
@@ -40,6 +43,16 @@ describe('ProfilePage Component & Stats Integration Tests (ProfilePage.tsx - P2.
     // Default mocks for repositories
     vi.spyOn(statsRepoModule, 'getMyGameStats').mockResolvedValue([]);
     vi.spyOn(matchRepoModule, 'getMyRecentMatches').mockResolvedValue([]);
+    vi.spyOn(walletRepository, 'getMyBalance').mockResolvedValue(0);
+    vi.spyOn(seasonRepository, 'getMySeasonBadges').mockResolvedValue([]);
+    vi.spyOn(seasonRepository, 'getMyRecentDecay').mockResolvedValue(null);
+    vi.spyOn(catalogRepoModule, 'getActiveSeason').mockResolvedValue({
+      id: 1,
+      name: 'Mùa 1 - Khởi Nguyên',
+      startedAt: '2026-08-01T00:00:00Z',
+      endedAt: null,
+      isActive: true,
+    });
     vi.spyOn(syncOutboxModule, 'useSyncOutboxCount').mockReturnValue(0);
   });
 
@@ -279,5 +292,31 @@ describe('ProfilePage Component & Stats Integration Tests (ProfilePage.tsx - P2.
     expect(screen.getByTestId('profile-wallet-btn')).not.toBeNull();
     expect(screen.getByText('Ví Của Tôi')).not.toBeNull();
     expect(screen.getByText(/Điểm danh/)).not.toBeNull();
+  });
+
+  it('12. [P4.6d Season Badges] Render khối Huy hiệu mùa giải khi có dữ liệu', async () => {
+    vi.spyOn(seasonRepository, 'getMySeasonBadges').mockResolvedValue([
+      {
+        id: 'badge-test-1',
+        seasonId: 1,
+        seasonName: 'Mùa 1 - Khởi Nguyên',
+        gameId: 'caro',
+        finalRating: 1700,
+        finalTier: 'diamond',
+        finalRank: 1,
+        gamesPlayed: 20,
+        wins: 15,
+        losses: 5,
+        draws: 0,
+        createdAt: '2026-08-26T20:00:00Z',
+      },
+    ]);
+
+    await renderProfilePage();
+
+    expect(screen.getByTestId('season-badges-section')).not.toBeNull();
+    expect(screen.getByText('Kỷ Vật & Huy Hiệu Mùa Giải')).not.toBeNull();
+    expect(screen.getByText('Mùa 1 - Khởi Nguyên')).not.toBeNull();
+    expect(screen.getByText('🥇 Top #1')).not.toBeNull();
   });
 });

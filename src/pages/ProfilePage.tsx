@@ -10,12 +10,21 @@ import { useSyncOutboxCount } from '@/core/syncOutbox';
 import { getMyGameStats } from '@/repositories/statsRepository';
 import { getMyRecentMatches } from '@/repositories/matchRepository';
 import { walletRepository } from '@/repositories/walletRepository';
-import type { PlayerGameStats, MatchSummary } from '@/repositories/types';
+import { seasonRepository } from '@/repositories/seasonRepository';
+import { getActiveSeason } from '@/repositories/catalogRepository';
+import type {
+  PlayerGameStats,
+  MatchSummary,
+  SeasonBadge,
+  Season,
+  RecentDecayLog,
+} from '@/repositories/types';
 import { StatsSummary } from '@/components/stats/StatsSummary';
 import { GameStatCard } from '@/components/stats/GameStatCard';
 import { MatchHistoryList } from '@/components/stats/MatchHistoryList';
 import { ActiveMatchBanner } from '@/components/ActiveMatchBanner';
 import { RankCard, useMyRankViews } from '@/components/rank';
+import { SeasonBadgesSection, NewSeasonBanner } from '@/components/season';
 
 /**
  * ==============================================================================
@@ -65,6 +74,12 @@ export function ProfilePage() {
   const [isLoadingCloud, setIsLoadingCloud] = useState<boolean>(true);
   const [cloudError, setCloudError] = useState<string | null>(null);
 
+  // State huy hiệu mùa & mùa active & decay logs (P4.6d)
+  const [seasonBadges, setSeasonBadges] = useState<SeasonBadge[]>([]);
+  const [activeSeason, setActiveSeason] = useState<Season | null>(null);
+  const [decayLogs, setDecayLogs] = useState<Record<string, RecentDecayLog>>({});
+  const [isLoadingBadges, setIsLoadingBadges] = useState<boolean>(true);
+
   // Dữ liệu Rank Views cho từng game ranked (P4.3b)
   const { rankViews, isLoading: isLoadingRank, error: rankError } = useMyRankViews();
 
@@ -86,34 +101,64 @@ export function ProfilePage() {
     [allRegisteredGames],
   );
 
-  // Hàm tải dữ liệu thống kê, lịch sử và ví từ Cloud (Song song Promise.all)
+  // Hàm tải dữ liệu thống kê, lịch sử, ví và huy hiệu mùa từ Cloud (Song song Promise.all)
   const fetchCloudData = useCallback(async () => {
     if (!user) {
       setCloudStats([]);
       setRecentMatches([]);
       setWalletBalance(0);
+      setSeasonBadges([]);
+      setActiveSeason(null);
+      setDecayLogs({});
       setIsLoadingCloud(false);
+      setIsLoadingBadges(false);
       return;
     }
 
     setIsLoadingCloud(true);
+    setIsLoadingBadges(true);
     setCloudError(null);
 
     try {
-      const [statsData, matchesData, bal] = await Promise.all([
+      const [statsData, matchesData, bal, badges, currentSeason] = await Promise.all([
         getMyGameStats(),
         getMyRecentMatches(undefined, 10),
         walletRepository.getMyBalance().catch(() => 0),
+        seasonRepository.getMySeasonBadges().catch(() => []),
+        getActiveSeason().catch(() => null),
       ]);
       setCloudStats(statsData);
       setRecentMatches(matchesData);
       setWalletBalance(bal);
+      setSeasonBadges(badges);
+      setActiveSeason(currentSeason);
+
+      // Tải decay log cho các game ranked
+      const rankedGameIds = allRegisteredGames
+        .filter((g) => g.definition.ranked)
+        .map((g) => g.definition.id);
+
+      const decayResults = await Promise.all(
+        rankedGameIds.map(async (gId) => {
+          const log = await seasonRepository.getMyRecentDecay(gId).catch(() => null);
+          return { gId, log };
+        }),
+      );
+
+      const decayMap: Record<string, RecentDecayLog> = {};
+      for (const res of decayResults) {
+        if (res.log) {
+          decayMap[res.gId] = res.log;
+        }
+      }
+      setDecayLogs(decayMap);
     } catch {
       setCloudError('Không thể kết nối máy chủ để lấy thống kê mới nhất.');
     } finally {
       setIsLoadingCloud(false);
+      setIsLoadingBadges(false);
     }
-  }, [user]);
+  }, [user, allRegisteredGames]);
 
   // Tải dữ liệu khi component mount hoặc khi user thay đổi
   useEffect(() => {
@@ -220,6 +265,9 @@ export function ProfilePage() {
     <div className="space-y-6 max-w-lg mx-auto pb-8">
       {/* BANNER TRẬN ĐẤU DỞ DANG (P3.5b) */}
       <ActiveMatchBanner />
+
+      {/* BANNER THÔNG BÁO MÙA GIẢI MỚI (P4.6d) */}
+      <NewSeasonBanner activeSeason={activeSeason} />
 
       {/* 1. TIÊU ĐỀ TRANG */}
       <section className="text-center space-y-2">
@@ -372,6 +420,7 @@ export function ProfilePage() {
                 <RankCard
                   definition={game.definition}
                   rankView={rankViews[game.definition.id] ?? null}
+                  decayInfo={decayLogs[game.definition.id] ?? null}
                   onPlay={() => navigate(`/game/${game.definition.id}`)}
                   isLoading={isLoadingRank}
                 />
@@ -388,6 +437,13 @@ export function ProfilePage() {
           ))}
         </div>
       </section>
+
+      {/* 4b. KHỐI KỶ VẬT & HUY HIỆU MÙA GIẢI (P4.6d) */}
+      <SeasonBadgesSection
+        badges={seasonBadges}
+        getGameName={getGameName}
+        isLoading={isLoadingBadges}
+      />
 
       {/* 5. LỊCH SỬ VÁN ĐẤU GẦN ĐÂY (MATCH HISTORY LIST) */}
       <section className="space-y-3">
