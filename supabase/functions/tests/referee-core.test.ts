@@ -57,10 +57,13 @@ function createMockEnvironment(overrides?: Partial<RefereeDependencies>) {
     fn: string;
     action: string;
     matchId: string;
-    userId: string;
+    userId?: string;
     moveIndex?: number;
     outcome: string;
-    ms: number;
+    ms?: number;
+    error?: string;
+    reason?: string;
+    entries?: number;
   }[] = [];
   let isFinalized = false;
   let isLiveStateDeleted = false;

@@ -10,6 +10,7 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
       '@engines': path.resolve(__dirname, './packages/engines'),
+      '@rating': path.resolve(__dirname, './packages/rating'),
     },
   },
   test: {
