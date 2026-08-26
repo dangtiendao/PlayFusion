@@ -106,7 +106,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_leaderboard_grinders_user
 
 -- INDEX tối ưu truy vấn phân trang bảng xếp hạng theo chuẩn Tie-Break P4.4 (Coins DESC, User_ID ASC)
 CREATE INDEX IF NOT EXISTS idx_mv_leaderboard_grinders_ranking 
-  ON public.mv_leaderboard_grinders (earned_coins DESC, wt.user_id ASC);
+  ON public.mv_leaderboard_grinders (earned_coins DESC, user_id ASC);
 
 COMMENT ON MATERIALIZED VIEW public.mv_leaderboard_grinders IS 
   'Bảng xếp hạng Chăm Chỉ: Tổng xu thu được từ ván đấu trong mùa active, mở cho toàn bộ người chơi.';

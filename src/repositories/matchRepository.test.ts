@@ -331,34 +331,32 @@ describe('Match Repository Unit Tests (matchRepository.ts - P2.5a)', () => {
                   eq: vi.fn().mockReturnValue({
                     is: vi.fn().mockReturnValue({
                       in: vi.fn().mockReturnValue({
-                        order: vi.fn().mockReturnValue({
-                          limit: vi.fn().mockResolvedValue({
-                            data: [
-                              {
-                                match_id: 'match-1',
-                                seat_index: 0,
-                                matches: {
-                                  id: 'match-1',
-                                  game_id: 'caro',
-                                  mode: 'online_correspondence',
-                                  started_at: '2026-08-23T08:00:00Z',
-                                  ended_at: null,
-                                },
+                        limit: vi.fn().mockResolvedValue({
+                          data: [
+                            {
+                              match_id: 'match-1',
+                              seat_index: 0,
+                              matches: {
+                                id: 'match-1',
+                                game_id: 'caro',
+                                mode: 'online_correspondence',
+                                started_at: '2026-08-23T08:00:00Z',
+                                ended_at: null,
                               },
-                              {
-                                match_id: 'match-2',
-                                seat_index: 1,
-                                matches: {
-                                  id: 'match-2',
-                                  game_id: 'caro',
-                                  mode: 'online_1v1',
-                                  started_at: '2026-08-23T08:10:00Z',
-                                  ended_at: null,
-                                },
+                            },
+                            {
+                              match_id: 'match-2',
+                              seat_index: 1,
+                              matches: {
+                                id: 'match-2',
+                                game_id: 'caro',
+                                mode: 'online_1v1',
+                                started_at: '2026-08-23T08:10:00Z',
+                                ended_at: null,
                               },
-                            ],
-                            error: null,
-                          }),
+                            },
+                          ],
+                          error: null,
                         }),
                       }),
                     }),

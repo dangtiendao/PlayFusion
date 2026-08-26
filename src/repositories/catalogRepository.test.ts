@@ -110,8 +110,8 @@ describe('Catalog Repository Unit Tests (catalogRepository.ts - P2.5a)', () => {
       const mockSeason = {
         id: 1,
         name: 'Mùa 1 - Khởi Nguyên',
-        start_at: '2026-08-18T00:00:00.000Z',
-        end_at: null,
+        started_at: '2026-08-18T00:00:00.000Z',
+        ended_at: null,
         is_active: true,
       };
 

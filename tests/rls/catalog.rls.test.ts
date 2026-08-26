@@ -39,9 +39,8 @@ describe('RLS Security Suite: Danh Mục Game, Mùa Giải & Khách Vãng Lai (g
       userAClient
         .from('seasons')
         .insert({
-          id: `hack_season_${Date.now()}`,
           name: 'Hack Season',
-          start_at: new Date().toISOString(),
+          started_at: new Date().toISOString(),
         })
         .select(),
     );
