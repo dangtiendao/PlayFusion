@@ -129,3 +129,26 @@
    - Client không bao giờ tự ý ghi nhận kết quả trận đấu online trực tiếp vào DB.
 3. **Kế Hoạch Khóa Kênh Riêng Tư (Private Channel Authorization)**:
    - Ở Phase P3.3 (Hệ thống Phòng Đấu mã 6 ký tự), hệ thống sẽ cân nhắc kích hoạt cơ chế Private Channel Authorization (xác thực quyền vào phòng qua Supabase Auth RLS/Token) để ngăn chặn người ngoài nghe lén hoặc can thiệp vào phòng thi đấu.
+
+---
+
+## 6. PHÂN QUYỀN MATERIALIZED VIEWS & PG_CRON REFRESH JOBS (PHASE P4.7a)
+
+> [!IMPORTANT] > **ĐẶC THÙ KỸ THUẬT MATERIALIZED VIEW**:
+>
+> - Materialized Views trong PostgreSQL **KHÔNG hỗ trợ chính sách Row Level Security (RLS)**.
+> - Quyền kiểm soát truy cập dữ liệu được phân định tường minh qua cơ chế phân quyền đối tượng tiêu chuẩn của PostgreSQL (`GRANT` / `REVOKE`).
+
+### A. Danh Sách Materialized Views & Phân Quyền Truy Cập
+
+| Tên Materialized View                                             | Vai Trò & Dữ Liệu Tổng Hợp                                                                                                                              | `anon`<br>_(Chưa Auth)_ | `authenticated`<br>_(Đã đăng nhập)_ | `service_role`<br>_(Backend / Cron)_ | Phân Tích Quyền Riêng Tư (Privacy) & Ràng Buộc                                                                                                                                  |
+| :---------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------ | :---------------------: | :---------------------------------: | :----------------------------------: | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **`public.mv_leaderboard_masters`**<br>_(Bảng Cao Thủ Tổng Hợp)_  | Điểm Elo trung bình có trọng số theo số trận: $\text{ROUND}(\sum(R \times N) / \sum N)$ của các game đã định hạng ($\ge 10$ ván) trong mùa giải active. |   ❌ Bị chặn (42501)    |       ✅ Được đọc (`SELECT`)        |            ✅ Toàn quyền             | **Dữ liệu công khai**: Suy diễn từ `player_ratings` và `profiles` (đã là thông tin công khai toàn hệ). Chặn `anon` chống bot cào dữ liệu.                                       |
+| **`public.mv_leaderboard_grinders`**<br>_(Bảng Chăm Chỉ Toàn Hệ)_ | Tổng số xu kiếm được từ trận đấu (`type = 'match_reward'`) và số ván nhận thưởng trong mùa giải active.                                                 |   ❌ Bị chặn (42501)    |       ✅ Được đọc (`SELECT`)        |            ✅ Toàn quyền             | **Bảo mật số dư ví**: **TUYỆT ĐỐI KHÔNG LỘ số dư ví (`balance`)**, tiền nạp, tiền tiêu hay lịch sử sổ cái riêng tư. Chỉ công khai tổng xu thu được từ thi đấu (`earned_coins`). |
+
+### B. Lịch Làm Mới Tự Động Qua Extension `pg_cron`
+
+| Tên Job Cron               | Lịch Chạy (Cron Schedule)                                                  | Lệnh Thực Thi Trực Tiếp                                                  | Ghi Chú Kỹ Thuật                                                                                                                               |
+| :------------------------- | :------------------------------------------------------------------------- | :----------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`wgh_refresh_masters`**  | `*/10 * * * *`<br>_(Mỗi 10 phút: :00, :10, :20, :30, :40, :50)_            | `REFRESH MATERIALIZED VIEW CONCURRENTLY public.mv_leaderboard_masters;`  | **Không bọc qua PL/pgSQL function**: PostgreSQL cấm chạy `REFRESH CONCURRENTLY` bên trong transaction block. Gọi trực tiếp từ `cron.schedule`. |
+| **`wgh_refresh_grinders`** | `2-59/10 * * * *`<br>_(Mỗi 10 phút lệch 2p: :02, :12, :22, :32, :42, :52)_ | `REFRESH MATERIALIZED VIEW CONCURRENTLY public.mv_leaderboard_grinders;` | **Lệch pha 2 phút**: Tránh tranh chấp tài nguyên Disk I/O khi 2 view refresh cùng lúc.                                                         |
