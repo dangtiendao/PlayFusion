@@ -16,6 +16,7 @@ export {
   type MatchScore,
   type PairUpdateResult,
   DEFAULT_ELO_CONFIG,
+  PLACEMENT_GAMES_DEFAULT,
 } from './types.ts';
 
 // 2. 1v1 Core Elo Functions
@@ -26,3 +27,17 @@ export { type FfaParticipant, type FfaUpdateResult, updateFfa } from './ffa.ts';
 
 // 4. Configuration Parser & Types (Fail-Soft for P4.2 settle_match)
 export { type ParsedEloConfigResult, parseEloConfig } from './config.ts';
+
+// 5. Tier Rules, Mapping Table & Demotion Protection (P4.3a & P4.3c)
+export {
+  type TierId,
+  type TierDef,
+  type TierProgress,
+  type RankViewInput,
+  type RankView,
+  TIER_TABLE,
+  getTierByRating,
+  getTierProgress,
+  resolveRankView,
+  compareTiers,
+} from './tiers.ts';

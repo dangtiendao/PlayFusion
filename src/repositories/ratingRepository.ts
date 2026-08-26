@@ -138,3 +138,63 @@ export async function getRating(
     throw new Error('Lỗi không xác định khi tra cứu điểm xếp hạng.');
   }
 }
+
+/**
+ * Lấy biến động điểm số (`ratingBefore`, `ratingAfter`) của trận đấu Xếp Hạng gần nhất.
+ * Dùng để suy diễn kích hoạt cơ chế Khiên Bảo Vệ Rớt Bậc (Demotion Protection Shield).
+ *
+ * @param gameId Mã trò chơi (ví dụ: 'caro').
+ * @param seasonId ID mùa giải cần lọc (tùy chọn).
+ * @returns Đối tượng chứa `{ ratingBefore, ratingAfter }` hoặc `null` nếu chưa có trận nào hoặc là dữ liệu cũ chưa có rating_before.
+ */
+export async function getMyLastRankedMatchDelta(
+  gameId: string,
+  seasonId?: number,
+): Promise<{ ratingBefore: number; ratingAfter: number } | null> {
+  try {
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      return null;
+    }
+
+    let query = supabase
+      .from('match_participants')
+      .select(
+        'rating_before, rating_after, created_at, matches!inner(game_id, is_ranked, season_id)',
+      )
+      .eq('user_id', user.id)
+      .not('rating_before', 'is', null)
+      .not('rating_after', 'is', null)
+      .eq('matches.game_id', gameId)
+      .eq('matches.is_ranked', true);
+
+    if (seasonId !== undefined) {
+      query = query.eq('matches.season_id', seasonId);
+    }
+
+    const { data, error } = await query
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      // Ghi log lỗi nhẹ nhàng và trả về null (fail-soft để không phá vỡ UI)
+      return null;
+    }
+
+    if (!data || data.rating_before === null || data.rating_after === null) {
+      return null;
+    }
+
+    return {
+      ratingBefore: data.rating_before,
+      ratingAfter: data.rating_after,
+    };
+  } catch {
+    return null;
+  }
+}

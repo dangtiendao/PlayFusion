@@ -259,4 +259,17 @@ describe('ProfilePage Component & Stats Integration Tests (ProfilePage.tsx - P2.
     expect(screen.getByTestId('sync-pending-badge')).not.toBeNull();
     expect(screen.getByText('Chờ đồng bộ: 3 trận')).not.toBeNull();
   });
+
+  it('10. [P4.3b RankCard Integration] Render RankCard đúng cho game ranked (caro) và KHÔNG có cho game không ranked', async () => {
+    await renderProfilePage();
+
+    // Game 'caro' có ranked = true -> có thẻ rank-card
+    const caroRankCard = screen.queryByTestId('rank-card');
+    expect(caroRankCard).not.toBeNull();
+    expect(caroRankCard?.getAttribute('data-game-id')).toBe('caro');
+
+    // Game 'dummy' & 'dummy2' không có ranked -> không có thẻ rank-card
+    expect(screen.queryByTestId('rank-card-dummy')).toBeNull();
+    expect(screen.queryByTestId('rank-card-dummy2')).toBeNull();
+  });
 });

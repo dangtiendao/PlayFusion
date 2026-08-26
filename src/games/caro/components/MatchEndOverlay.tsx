@@ -1,6 +1,6 @@
 /**
  * ==============================================================================
- * MATCH END OVERLAY COMPONENT (MÀN HÌNH KẾT THÚC TRẬN ĐẤU CỜ CARO)
+ * MATCH END OVERLAY COMPONENT (MÀN HÌNH KẾT THÚC TRẬN ĐẤU CỜ CARO - P4.3c)
  * ==============================================================================
  *
  * ⚠️ NGUYÊN TẮC THIẾT KẾ & UX:
@@ -10,16 +10,25 @@
  * 2. Xuất hiện có độ trễ nhẹ ~800ms (`DELAY_BEFORE_SHOW_MS = 800`):
  *    - Giúp người chơi có 0.8s chiêm ngưỡng nước cờ quyết định trên bàn trước khi overlay xuất hiện.
  * 3. Confetti CSS thuần nhẹ (~25 dòng):
- *    - Tự động bung pháo giấy khi người chơi chiến thắng, tự động tắt khi bật `prefers-reduced-motion`.
+ *    - Tự động bung pháo giấy khi người chơi chiến thắng hoặc THĂNG HẠNG, tự động tắt khi bật `prefers-reduced-motion`.
  * 4. Tỷ số phiên đấu (Session Score) & Thống kê tích lũy dài hạn (Accumulated Stats - P1.5a).
+ * 5. Khối kết toán Xếp Hạng (Rank Settled Block - P4.3c):
+ *    - Hiển thị biến động điểm số (+/- Elo) và thưởng xu (+ xu 🪙).
+ *    - Animation nảy số counter mượt mà trong ~800ms (prefers-reduced-motion thì hiện thẳng).
+ *    - Hiệu ứng THĂNG HẠNG (Rank Up): Banner rực rỡ, badge to, confetti, sfx/haptic chạy ĐÚNG 1 LẦN DUY NHẤT.
+ *    - Thông điệp Khiên Bảo Vệ rớt hạng (Demotion Shield): Nhắc nhở người chơi thắng trận kế tiếp để giữ bậc.
+ *    - Rớt hạng thật: Thông báo nhẹ nhàng, không âm thanh chói tai (tôn trọng cảm xúc người dùng).
+ * ==============================================================================
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type { MatchResultReport } from '@engines/types';
 import type { GameShellApi } from '../../types';
 import type { CaroMatchConfig } from '../types';
 import type { GameLocalStats } from '../../../core/gameLocalData';
 import { getAiLevelLabel } from '../../labels';
+import { RankBadge } from '@/components/rank/RankBadge';
+import type { TierDef } from '@rating';
 
 export interface SessionScore {
   /** Số trận thắng của Người chơi 1 (hoặc Bạn khi đấu AI) */
@@ -30,6 +39,25 @@ export interface SessionScore {
   readonly draws: number;
   /** Thứ tự ván đấu hiện tại trong phiên (1, 2, 3...) */
   readonly matchNumber: number;
+}
+
+export interface MatchSettledData {
+  /** Biến động điểm Elo (ví dụ +16, -16, 0) */
+  readonly ratingDelta: number;
+  /** Điểm Elo mới sau trận */
+  readonly newRating: number;
+  /** Điểm Elo cũ trước trận */
+  readonly oldRating: number;
+  /** Số xu nhận được */
+  readonly coins: number;
+  /** Bậc rank trước trận */
+  readonly tierBefore: TierDef;
+  /** Bậc rank sau trận */
+  readonly tierAfter: TierDef;
+  /** Hướng biến động rank ('up' | 'down' | 'same') */
+  readonly rankChange: 'up' | 'down' | 'same';
+  /** Có đang được bảo vệ bởi khiên rớt hạng hay không */
+  readonly isShielded?: boolean;
 }
 
 export interface MatchEndOverlayProps {
@@ -45,6 +73,8 @@ export interface MatchEndOverlayProps {
   readonly accumulatedStats?: GameLocalStats | null;
   /** Lý do kết thúc ván đấu (P3.4c: normal | resign | timeout | abort) */
   readonly endReason?: 'normal' | 'resign' | 'timeout' | 'abort' | string;
+  /** Dữ liệu kết toán xếp hạng từ broadcast match_settled (P4.3c) */
+  readonly settledData?: MatchSettledData | null;
   /** Callback chơi lại ván mới (kèm đảo lượt đi trước) */
   readonly onRestart: () => void;
   /** Callback quay lại màn hình chọn chế độ */
@@ -67,6 +97,7 @@ export const MatchEndOverlay: React.FC<MatchEndOverlayProps> = ({
   sessionScore,
   accumulatedStats,
   endReason = 'normal',
+  settledData,
   onRestart,
   onBackToSetup,
   onExit,
@@ -74,6 +105,14 @@ export const MatchEndOverlay: React.FC<MatchEndOverlayProps> = ({
   className = '',
 }) => {
   const [isVisible, setIsVisible] = useState(false);
+
+  // State animated rating counter (P4.3c)
+  const [animatedRating, setAnimatedRating] = useState<number>(
+    settledData ? settledData.oldRating : 0,
+  );
+
+  // Ref đảm bảo hiệu ứng Thăng Hạng chỉ chạy đúng 1 lần duy nhất
+  const hasRankUpEffectPlayedRef = useRef<boolean>(false);
 
   const isVsAi = matchConfig.mode === 'vs_ai';
   const humanSeat = matchConfig.humanSeat ?? 0;
@@ -106,6 +145,54 @@ export const MatchEndOverlay: React.FC<MatchEndOverlayProps> = ({
 
     return () => clearTimeout(timer);
   }, [isDraw, isHumanWinner, isHumanLoser, endReason, shellApi]);
+
+  // Hiệu ứng nảy số điểm Elo (Counter Animation ~800ms)
+  useEffect(() => {
+    if (!settledData) return;
+
+    // Kiểm tra prefers-reduced-motion
+    const prefersReducedMotion =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (prefersReducedMotion) {
+      setAnimatedRating(settledData.newRating);
+      return;
+    }
+
+    const startRating = settledData.oldRating;
+    const targetRating = settledData.newRating;
+    const durationMs = 800;
+    const startTime = performance.now();
+
+    let animationFrameId: number;
+
+    const step = (currentTime: number) => {
+      const elapsed = currentTime - startTime;
+      const progress = Math.min(elapsed / durationMs, 1);
+      // Easing out cubic
+      const easeOut = 1 - Math.pow(1 - progress, 3);
+      const currentVal = Math.round(startRating + (targetRating - startRating) * easeOut);
+      setAnimatedRating(currentVal);
+
+      if (progress < 1) {
+        animationFrameId = requestAnimationFrame(step);
+      }
+    };
+
+    animationFrameId = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [settledData]);
+
+  // Hiệu ứng Thăng Hạng (chạy đúng 1 lần khi có rankUp)
+  useEffect(() => {
+    if (isVisible && settledData?.rankChange === 'up' && !hasRankUpEffectPlayedRef.current) {
+      hasRankUpEffectPlayedRef.current = true;
+      shellApi?.playSfx('success');
+      shellApi?.hapticSuccess();
+    }
+  }, [isVisible, settledData, shellApi]);
 
   if (!isVisible) {
     return null;
@@ -183,10 +270,10 @@ export const MatchEndOverlay: React.FC<MatchEndOverlayProps> = ({
     >
       {/* 
         ========================================================================
-        HIỆU ỨNG PHÁO GIẤY CONFETTI (CSS THUẦN — TẮT KHI REDUCED-MOTION)
+        HIỆU ỨNG PHÁO GIẤY CONFETTI (CSS THUẦN — KHI THẮNG HOẶC THĂNG HẠNG)
         ========================================================================
       */}
-      {isHumanWinner && !isDraw && (
+      {((isHumanWinner && !isDraw) || settledData?.rankChange === 'up') && (
         <div
           data-testid="confetti-container"
           aria-hidden="true"
@@ -242,6 +329,94 @@ export const MatchEndOverlay: React.FC<MatchEndOverlayProps> = ({
             </span>
           </p>
         </div>
+
+        {/* 
+          ======================================================================
+          KHỐI KẾT TOÁN XẾP HẠNG & BIẾN ĐỘNG ĐIỂM (RANK SETTLED BLOCK - P4.3c)
+          ======================================================================
+        */}
+        {settledData && endReason !== 'abort' && (
+          <div
+            data-testid="rank-settled-card"
+            className="w-full p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-2.5 text-center shadow-inner"
+          >
+            {/* Trường hợp 1: THĂNG HẠNG (RANK UP) */}
+            {settledData.rankChange === 'up' && (
+              <div
+                data-testid="rank-up-banner"
+                className="py-1.5 px-3 rounded-xl bg-gradient-to-r from-amber-500/20 via-yellow-500/30 to-amber-500/20 border border-amber-400/50 text-amber-300 font-extrabold text-sm tracking-wide animate-pulse"
+              >
+                🌟 THĂNG HẠNG! 🌟
+              </div>
+            )}
+
+            {/* Bậc Rank & Biến động điểm */}
+            <div className="flex items-center justify-between gap-2 px-1">
+              <div className="flex items-center gap-2">
+                <RankBadge
+                  tier={
+                    settledData.rankChange === 'down' && settledData.isShielded
+                      ? settledData.tierBefore
+                      : settledData.tierAfter
+                  }
+                  size={settledData.rankChange === 'up' ? 'lg' : 'md'}
+                  shield={settledData.rankChange === 'down' && !!settledData.isShielded}
+                />
+              </div>
+
+              <div className="text-right">
+                <div className="flex items-center justify-end gap-1.5">
+                  <span
+                    data-testid="rating-delta-text"
+                    className={`font-black text-sm ${
+                      settledData.ratingDelta > 0
+                        ? 'text-emerald-400'
+                        : settledData.ratingDelta < 0
+                          ? 'text-rose-400'
+                          : 'text-slate-400'
+                    }`}
+                  >
+                    {settledData.ratingDelta > 0
+                      ? `+${settledData.ratingDelta}`
+                      : settledData.ratingDelta}{' '}
+                    điểm
+                  </span>
+                  {settledData.coins > 0 && (
+                    <span
+                      data-testid="coins-reward-text"
+                      className="text-xs font-bold text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-md border border-amber-500/20"
+                    >
+                      +{settledData.coins} xu 🪙
+                    </span>
+                  )}
+                </div>
+                <div
+                  data-testid="animated-rating-text"
+                  className="text-[11px] text-slate-400 font-mono font-medium"
+                >
+                  {animatedRating} Elo
+                </div>
+              </div>
+            </div>
+
+            {/* Trường hợp 2: Có Khiên Bảo Vệ Rớt Hạng */}
+            {settledData.rankChange === 'down' && settledData.isShielded && (
+              <div
+                data-testid="demotion-shield-message"
+                className="py-1 px-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] font-medium"
+              >
+                🛡️ Được bảo vệ rớt hạng — thắng trận sau để giữ {settledData.tierBefore.name}!
+              </div>
+            )}
+
+            {/* Trường hợp 3: Rớt hạng thật (Không rầm rộ, UX nhẹ nhàng) */}
+            {settledData.rankChange === 'down' && !settledData.isShielded && (
+              <div data-testid="demotion-message" className="text-[11px] text-slate-400 italic">
+                Xuống hạng {settledData.tierAfter.name} — cố lên!
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Bảng Tỷ Số Phiên (Session Score) */}
         {sessionScore && (

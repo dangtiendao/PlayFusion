@@ -1,5 +1,6 @@
 import type React from 'react';
-import type { GameDefinition, MatchResultReport } from '@engines/types';
+import type { GameDefinition, MatchResultReport, Engine } from '@engines/types';
+export type { GameDefinition, MatchResultReport, Engine };
 
 /**
  * ==============================================================================
