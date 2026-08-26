@@ -218,5 +218,83 @@ describe.runIf(isRlsTestConfigured())(
       expect(errConfigAnon).toBeNull();
       expect(configAnon?.value).toEqual({ factor: 0.6, offset: 480 });
     });
+
+    it('7. [Ma trận: rating_decay_log -> SELECT (Chính Chủ)] userA xem được log của mình, userB/anon thấy 0 dòng', async () => {
+      // 7.1 service_role tạo 1 bản ghi decay log cho userA
+      const testDecayLog = {
+        user_id: userAId,
+        game_id: 'caro',
+        season_id: testSeasonId,
+        week_key: '2026-99',
+        points: 10,
+        rating_before: 1700,
+        rating_after: 1690,
+      };
+
+      const { data: insertedLog, error: insertLogErr } = await serviceClient
+        .from('rating_decay_log')
+        .insert(testDecayLog)
+        .select()
+        .single();
+
+      expect(insertLogErr).toBeNull();
+      expect(insertedLog).toBeTruthy();
+      const logId = insertedLog.id;
+
+      // 7.2 userA (chính chủ) SELECT thấy
+      const { data: dataA, error: errA } = await userAClient
+        .from('rating_decay_log')
+        .select('*')
+        .eq('id', logId)
+        .single();
+
+      expect(errA).toBeNull();
+      expect(dataA?.user_id).toBe(userAId);
+      expect(dataA?.points).toBe(10);
+
+      // 7.3 userB (người khác) SELECT -> 0 dòng
+      const { data: dataB, error: errB } = await userBClient
+        .from('rating_decay_log')
+        .select('*')
+        .eq('id', logId);
+
+      expect(errB).toBeNull();
+      expect(dataB).toHaveLength(0);
+
+      // 7.4 anon SELECT -> 0 dòng
+      const { data: dataAnon, error: errAnon } = await anonClient
+        .from('rating_decay_log')
+        .select('*')
+        .eq('id', logId);
+
+      expect(errAnon).toBeNull();
+      expect(dataAnon).toHaveLength(0);
+    });
+
+    it('8. [Ma trận: rating_decay_log -> INSERT/UPDATE/DELETE (Client & Append-Only)] Bị chặn bởi RLS & Trigger', async () => {
+      const fakeLog = {
+        user_id: userAId,
+        game_id: 'caro',
+        season_id: testSeasonId,
+        week_key: '2026-98',
+        points: 10,
+        rating_before: 1700,
+        rating_after: 1690,
+      };
+
+      // userA cố tự INSERT
+      await expectRlsBlocked(userAClient.from('rating_decay_log').insert(fakeLog).select());
+
+      // service_role cố UPDATE bản ghi decay log -> Bị chặn bởi Trigger Append-Only
+      const { error: updateErr } = await serviceClient
+        .from('rating_decay_log')
+        .update({ points: 99 })
+        .eq('week_key', '2026-99');
+
+      expect(updateErr).not.toBeNull();
+      expect(updateErr?.message).toContain(
+        'Rating decay logs are permanent append-only audit records',
+      );
+    });
   },
 );
