@@ -43,6 +43,7 @@ import { useMatchChannel, type PresenceMember } from '@/transport';
 import { useTransportReconnectAttempt } from '@/stores/transportStore';
 import { refereeRepository } from '@/repositories/refereeRepository';
 import { matchRepository } from '@/repositories/matchRepository';
+import { invalidateLeaderboardCache } from '@/repositories/leaderboardRepository';
 import { useAuthStore } from '@/stores/authStore';
 import { computeOffset, calculateRemainingMs, formatMmSs } from '@/core/serverClock';
 import { hapticTap } from '@/core/haptics';
@@ -441,6 +442,9 @@ export const OnlineMatchScreen: React.FC<OnlineMatchScreenProps> = (props) => {
           rankChange,
           isShielded,
         });
+
+        // Xóa bộ đệm cache bảng xếp hạng của game này để trang Leaderboard cập nhật mới nhất
+        invalidateLeaderboardCache('caro');
       }
     },
     [resyncFromServer, matchId, user?.id],

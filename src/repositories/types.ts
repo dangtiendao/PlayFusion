@@ -227,3 +227,76 @@ export interface PlayerGameStats {
   /** Phân rã số liệu theo từng modeKey */
   readonly byModeKey: Record<string, ModeStats>;
 }
+
+/**
+ * Một dòng thông tin người chơi trên bảng xếp hạng (Leaderboard Entry).
+ */
+export interface LeaderboardEntry {
+  /**
+   * Thứ hạng 1-based của người chơi trên bảng xếp hạng.
+   *
+   * GHI CHÚ QUAN TRỌNG:
+   * - Rank được tính ở client từ vị trí bắt đầu của trang (`startRank + index`).
+   * - Rank chỉ bảo đảm đúng tuyệt đối khi người dùng tải liên tục từ trang 1.
+   *   Nếu dữ liệu trên server thay đổi giữa 2 lần tải trang, rank có thể lệch nhẹ (chấp nhận được).
+   */
+  readonly rank: number;
+  /** Mã định danh UUID của người chơi */
+  readonly userId: string;
+  /** Tên hiển thị công khai */
+  readonly displayName: string;
+  /** Đường dẫn ảnh đại diện (avatar) hoặc null nếu dùng avatar mặc định */
+  readonly avatarUrl: string | null;
+  /** Điểm xếp hạng Elo hiện tại */
+  readonly rating: number;
+  /** Tổng số ván xếp hạng đã đấu trong mùa */
+  readonly gamesPlayed: number;
+  /** Số ván thắng */
+  readonly wins: number;
+  /** Số ván thua */
+  readonly losses: number;
+  /** Điểm xếp hạng cao nhất từng đạt được trong mùa */
+  readonly bestRating: number;
+}
+
+/**
+ * Con trỏ kép (Dual Cursor) cho phân trang Keyset Pagination.
+ *
+ * GHI CHÚ QUAN TRỌNG:
+ * - Sử dụng cả `rating` và `userId` để chống kẹt / trôi con trỏ khi có nhiều người chơi cùng điểm số (đồng hạng).
+ */
+export interface LeaderboardCursor {
+  /** Điểm Elo của bản ghi cuối trang */
+  readonly rating: number;
+  /** UUID của người chơi cuối trang làm điểm neo tie-break */
+  readonly userId: string;
+}
+
+/**
+ * Kết quả phân trang một trang bảng xếp hạng (Leaderboard Page).
+ */
+export interface LeaderboardPage {
+  /** Danh sách các kỳ thủ trên trang hiện tại */
+  readonly entries: readonly LeaderboardEntry[];
+  /** Con trỏ kép để tải trang tiếp theo, hoặc null nếu đã đến trang cuối */
+  readonly nextCursor: LeaderboardCursor | null;
+}
+
+/**
+ * Thông tin thứ hạng cá nhân của người chơi hiện tại trên bảng xếp hạng.
+ */
+export interface MyLeaderboardRank {
+  /**
+   * Vị trí thứ hạng chính xác trong mùa (1-based).
+   * Giá trị là `null` nếu người chơi chưa đủ số trận tối thiểu (chưa lên bảng).
+   */
+  readonly rank: number | null;
+  /** Điểm Elo hiện tại */
+  readonly rating: number;
+  /** Tổng số ván xếp hạng đã thi đấu */
+  readonly gamesPlayed: number;
+  /**
+   * Cờ báo người chơi đã đủ điều kiện lên bảng xếp hạng hay chưa (gamesPlayed >= 10).
+   */
+  readonly eligible: boolean;
+}
