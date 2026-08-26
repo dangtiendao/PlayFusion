@@ -8,34 +8,36 @@ import {
   getMyRank,
   MIN_MATCHES_FOR_LEADERBOARD,
 } from '@/repositories/leaderboardRepository';
-import { LeaderboardList, MyRankFooter } from '@/components/leaderboard';
+import { globalLeaderboardRepository } from '@/repositories/globalLeaderboardRepository';
+import { LeaderboardList, MyRankFooter, GlobalLeaderboardList } from '@/components/leaderboard';
 import { useAuthStore } from '@/stores/authStore';
 import type {
   LeaderboardCursor,
   LeaderboardEntry,
   MyLeaderboardRank,
   Season,
+  MasterEntry,
+  GrinderEntry,
+  MyGlobalRank,
 } from '@/repositories/types';
 
 /**
  * ==============================================================================
- * TRANG BẢNG XẾP HẠNG (LEADERBOARD PAGE - PHASE P4.4c)
+ * TRANG BẢNG XẾP HẠNG (LEADERBOARD PAGE - PHASE P4.4c & P4.7c)
  * ==============================================================================
  *
  * GHI CHÚ KIẾN TRÚC & NGUYÊN TẮC BẤT BIẾN:
  * 1. NGUỒN CHÂN LÝ DUY NHẤT (REGISTRY-DRIVEN):
  *    - Danh sách tab trò chơi được lọc tự động từ `getAllGames().filter((g) => g.ranked)`.
- *    - TUYỆT ĐỐI KHÔNG hard-code tên bất kỳ trò chơi nào. Khi thêm game mới vào Registry,
- *      tab bảng xếp hạng sẽ tự động xuất hiện.
- * 2. ĐỒNG BỘ URL QUERY PARAMETER (?game=):
- *    - Trò chơi đang chọn được đồng bộ 2 chiều với query parameter `?game=<gameId>`.
- *    - Giúp người dùng chia sẻ link bảng xếp hạng hoặc F5 giữ nguyên trò chơi đang xem.
- * 3. TIẾT KIỆM TÀI NGUYÊN & CACHE REFRESH:
- *    - Tận dụng bộ đệm in-memory 60s từ `leaderboardRepository`.
+ *    - Chip tab "Tổng 🏆" đứng ĐẦU HÀNG cố định, độc lập và không phá vỡ Registry.
+ * 2. ĐỒNG BỘ URL QUERY PARAMETER (?game= & ?board=):
+ *    - Tab Tổng: `?game=global` kèm sub-board `?board=masters` hoặc `?board=grinders`.
+ *    - Tab Game: `?game=<gameId>`.
+ * 3. MINH BẠCH ĐỘ TRỄ DỮ LIỆU MATERIALIZED VIEW:
+ *    - Bảng Tổng có dòng chú thích: "Cập nhật ~10 phút/lần • Mùa {tên}".
+ * 4. TIẾT KIỆM TÀI NGUYÊN & CACHE REFRESH:
+ *    - Tận dụng bộ đệm in-memory 60s từ repository.
  *    - Tự động làm mới khi tab trình duyệt active trở lại (`visibilitychange`).
- * 4. CƠ CHẾ FAIL-SOFT KHI CHƯA CÓ MÙA GIẢI:
- *    - Nếu hệ thống chưa kích hoạt mùa giải nào (`activeSeason === null`), trang sẽ
- *      hiển thị thông báo nhẹ nhàng và ẩn danh sách thay vì văng lỗi.
  * ==============================================================================
  */
 
@@ -50,32 +52,44 @@ export function LeaderboardPage() {
       .map((entry) => entry.definition);
   }, []);
 
-  // 2. XÁC ĐỊNH GAME ĐANG ĐƯỢC CHỌN TỪ URL QUERY HOẶC MẶC ĐỊNH LÀ GAME ĐẦU TIÊN
+  // 2. XÁC ĐỊNH TAB ĐANG CHỌN (TỔNG HAY GAME CỤ THỂ)
   const gameParam = searchParams.get('game');
+  const boardParam = searchParams.get('board');
+  const selectedBoard: 'masters' | 'grinders' = boardParam === 'grinders' ? 'grinders' : 'masters';
+
+  const isGlobal = useMemo(() => {
+    if (!gameParam || gameParam === 'global') return true;
+    return false;
+  }, [gameParam]);
+
   const selectedGameId = useMemo(() => {
+    if (isGlobal) return '';
     if (gameParam && rankedGames.some((g) => g.id === gameParam)) {
       return gameParam;
     }
     return rankedGames[0]?.id || '';
-  }, [gameParam, rankedGames]);
+  }, [gameParam, isGlobal, rankedGames]);
 
   // 3. TRẠNG THÁI DỮ LIỆU
   const [activeSeason, setActiveSeason] = useState<Season | null>(null);
+
+  // Dữ liệu Bảng Game (P4.4)
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [nextCursor, setNextCursor] = useState<LeaderboardCursor | null>(null);
   const [myRank, setMyRank] = useState<MyLeaderboardRank | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
+
+  // Dữ liệu Bảng Toàn Hệ Thống (P4.7)
+  const [globalMasters, setGlobalMasters] = useState<MasterEntry[]>([]);
+  const [globalGrinders, setGlobalGrinders] = useState<GrinderEntry[]>([]);
+  const [myGlobalRank, setMyGlobalRank] = useState<MyGlobalRank | null>(null);
+
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  // 4. HÀM TẢI DỮ LIỆU TRANG ĐẦU TIÊN
+  // 4. HÀM TẢI DỮ LIỆU ĐẦU TIÊN
   const loadInitialData = useCallback(
     async (isSilent = false) => {
-      if (!selectedGameId) {
-        setIsLoading(false);
-        return;
-      }
-
       if (!isSilent) {
         setIsLoading(true);
       }
@@ -91,15 +105,39 @@ export function LeaderboardPage() {
           return;
         }
 
-        // Tải đồng thời bảng xếp hạng trang 1 và hạng cá nhân
-        const [pageData, rankData] = await Promise.all([
-          getLeaderboardPage(selectedGameId, season.id, null, 50, 1),
-          getMyRank(selectedGameId, season.id),
-        ]);
+        if (isGlobal) {
+          // TẢI BẢNG XẾP HẠNG TOÀN HỆ THỐNG (P4.7)
+          if (selectedBoard === 'masters') {
+            const [mastersData, rankData] = await Promise.all([
+              globalLeaderboardRepository.getMasters(100),
+              globalLeaderboardRepository.getMyGlobalRank('masters'),
+            ]);
+            setGlobalMasters(mastersData);
+            setMyGlobalRank(rankData);
+          } else {
+            const [grindersData, rankData] = await Promise.all([
+              globalLeaderboardRepository.getGrinders(100),
+              globalLeaderboardRepository.getMyGlobalRank('grinders'),
+            ]);
+            setGlobalGrinders(grindersData);
+            setMyGlobalRank(rankData);
+          }
+        } else {
+          // TẢI BẢNG XẾP HẠNG THEO GAME (P4.4)
+          if (!selectedGameId) {
+            setIsLoading(false);
+            return;
+          }
 
-        setEntries([...pageData.entries]);
-        setNextCursor(pageData.nextCursor);
-        setMyRank(rankData);
+          const [pageData, rankData] = await Promise.all([
+            getLeaderboardPage(selectedGameId, season.id, null, 50, 1),
+            getMyRank(selectedGameId, season.id),
+          ]);
+
+          setEntries([...pageData.entries]);
+          setNextCursor(pageData.nextCursor);
+          setMyRank(rankData);
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Không thể tải dữ liệu bảng xếp hạng';
         setError(message);
@@ -107,10 +145,10 @@ export function LeaderboardPage() {
         setIsLoading(false);
       }
     },
-    [selectedGameId],
+    [isGlobal, selectedBoard, selectedGameId],
   );
 
-  // 5. EFFECT TẢI DỮ LIỆU KHI CHỌN GAME / USER THAY ĐỔI
+  // 5. EFFECT TẢI DỮ LIỆU KHI CHỌN TAB / USER THAY ĐỔI
   useEffect(() => {
     void loadInitialData();
   }, [loadInitialData, user?.id]);
@@ -130,12 +168,21 @@ export function LeaderboardPage() {
   }, [loadInitialData]);
 
   // 7. XỬ LÝ CHUYỂN TAB TRÒ CHƠI
-  const handleTabChange = (gameId: string) => {
-    if (gameId === selectedGameId) return;
-    setSearchParams({ game: gameId }, { replace: true });
+  const handleTabChange = (target: string) => {
+    if (target === 'global') {
+      setSearchParams({ game: 'global', board: selectedBoard }, { replace: true });
+    } else {
+      setSearchParams({ game: target }, { replace: true });
+    }
   };
 
-  // 8. XỬ LÝ TẢI THÊM TRANG TIẾP THEO (KEYSET PAGINATION)
+  // 8. XỬ LÝ CHUYỂN SUB-BOARD TRONG TAB TỔNG
+  const handleBoardChange = (board: 'masters' | 'grinders') => {
+    if (board === selectedBoard) return;
+    setSearchParams({ game: 'global', board }, { replace: true });
+  };
+
+  // 9. XỬ LÝ TẢI THÊM TRANG TIẾP THEO CHO GAME (KEYSET PAGINATION)
   const handleLoadMore = async () => {
     if (!nextCursor || isLoadingMore || !activeSeason || !selectedGameId) {
       return;
@@ -184,33 +231,101 @@ export function LeaderboardPage() {
 
       {/* 
         ========================================================================
-        THANH TAB CHỌN GAME (REGISTRY-DRIVEN CHIP SCROLL)
+        THANH TAB CHỌN BẢNG (TAB TỔNG + REGISTRY-DRIVEN GAME CHIPS)
         ========================================================================
       */}
-      {rankedGames.length > 0 && (
-        <div
-          data-testid="ranked-games-tab-bar"
-          className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1 px-0.5 select-none"
+      <div
+        data-testid="ranked-games-tab-bar"
+        className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1 px-0.5 select-none"
+      >
+        {/* Tab Tổng Đứng Đầu Hàng */}
+        <button
+          type="button"
+          data-testid="game-tab-global"
+          onClick={() => handleTabChange('global')}
+          className={`inline-flex items-center gap-2 min-h-[44px] px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold shrink-0 transition-all active:scale-95 focus:outline-none focus:ring-2 focus:ring-primary-500 ${
+            isGlobal
+              ? 'bg-primary-600 text-white shadow-md shadow-primary-500/20'
+              : 'bg-surface dark:bg-surface-dark text-slate-700 dark:text-slate-200 border border-surface-border dark:border-surface-dark-border hover:bg-surface-muted dark:hover:bg-surface-dark-muted'
+          }`}
         >
-          {rankedGames.map((game) => {
-            const isSelected = game.id === selectedGameId;
-            return (
-              <button
-                key={game.id}
-                type="button"
-                data-testid={`game-tab-${game.id}`}
-                onClick={() => handleTabChange(game.id)}
-                className={`inline-flex items-center gap-2 min-h-[44px] px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold shrink-0 transition-all active:scale-95 focus:outline-none focus:ring-2 focus:ring-primary-500 ${
-                  isSelected
-                    ? 'bg-primary-600 text-white shadow-md shadow-primary-500/20'
-                    : 'bg-surface dark:bg-surface-dark text-slate-700 dark:text-slate-200 border border-surface-border dark:border-surface-dark-border hover:bg-surface-muted dark:hover:bg-surface-dark-muted'
-                }`}
-              >
-                <span className="text-base">{CATEGORY_CONFIGS[game.category]?.emoji || '🎮'}</span>
-                <span>{game.name}</span>
-              </button>
-            );
-          })}
+          <span className="text-base">🏆</span>
+          <span>Tổng</span>
+        </button>
+
+        {/* Các Tab Game từ Registry */}
+        {rankedGames.map((game) => {
+          const isSelected = !isGlobal && game.id === selectedGameId;
+          return (
+            <button
+              key={game.id}
+              type="button"
+              data-testid={`game-tab-${game.id}`}
+              onClick={() => handleTabChange(game.id)}
+              className={`inline-flex items-center gap-2 min-h-[44px] px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold shrink-0 transition-all active:scale-95 focus:outline-none focus:ring-2 focus:ring-primary-500 ${
+                isSelected
+                  ? 'bg-primary-600 text-white shadow-md shadow-primary-500/20'
+                  : 'bg-surface dark:bg-surface-dark text-slate-700 dark:text-slate-200 border border-surface-border dark:border-surface-dark-border hover:bg-surface-muted dark:hover:bg-surface-dark-muted'
+              }`}
+            >
+              <span className="text-base">{CATEGORY_CONFIGS[game.category]?.emoji || '🎮'}</span>
+              <span>{game.name}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* 
+        ========================================================================
+        SUB-CONTROL CHO TAB TỔNG (CAO THỦ VS CHĂM CHỈ + THÔNG TIN ĐỘ TRỄ)
+        ========================================================================
+      */}
+      {isGlobal && (
+        <div className="space-y-3 pt-1">
+          {/* Segmented Control Touch-Target >= 44px */}
+          <div
+            data-testid="global-board-segmented-control"
+            className="flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700"
+          >
+            <button
+              type="button"
+              data-testid="global-board-tab-masters"
+              onClick={() => handleBoardChange('masters')}
+              className={`flex-1 min-h-[44px] py-2 px-3 rounded-lg text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-1.5 focus:outline-none ${
+                selectedBoard === 'masters'
+                  ? 'bg-white dark:bg-slate-900 text-primary-600 dark:text-primary-400 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <span>🏆</span>
+              <span>Cao Thủ</span>
+            </button>
+            <button
+              type="button"
+              data-testid="global-board-tab-grinders"
+              onClick={() => handleBoardChange('grinders')}
+              className={`flex-1 min-h-[44px] py-2 px-3 rounded-lg text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-1.5 focus:outline-none ${
+                selectedBoard === 'grinders'
+                  ? 'bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <span>🔥</span>
+              <span>Chăm Chỉ</span>
+            </button>
+          </div>
+
+          {/* Dòng Chú Thích Độ Trễ & Mùa Giải (Minh bạch 100% trải nghiệm) */}
+          <div
+            data-testid="global-latency-notice"
+            className="flex items-center justify-between text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 px-1"
+          >
+            <span className="flex items-center gap-1">
+              <span>⏱️</span>
+              <span>Cập nhật ~10 phút/lần</span>
+            </span>
+            <span>Mùa: {activeSeason?.name || 'Mùa hiện tại'}</span>
+          </div>
         </div>
       )}
 
@@ -263,24 +378,32 @@ export function LeaderboardPage() {
         ========================================================================
       */}
       {(isLoading || activeSeason) && !error && (
-        <LeaderboardList
-          entries={entries}
-          myUserId={user?.id || null}
-          hasMore={nextCursor !== null}
-          isLoadingMore={isLoadingMore}
-          onLoadMore={handleLoadMore}
-          isLoading={isLoading}
-          emptyText="Chưa có kỳ thủ nào hoàn thành định hạng (10 trận) cho trò chơi này."
-        />
-      )}
-
-      {/* 
-        ========================================================================
-        THANH GHIM HẠNG CÁ NHÂN (MY RANK FOOTER)
-        ========================================================================
-      */}
-      {activeSeason && !isLoading && !error && (
-        <MyRankFooter myRank={myRank} minMatches={MIN_MATCHES_FOR_LEADERBOARD} />
+        <>
+          {isGlobal ? (
+            <GlobalLeaderboardList
+              variant={selectedBoard}
+              entries={selectedBoard === 'masters' ? globalMasters : globalGrinders}
+              myUserId={user?.id || null}
+              isLoading={isLoading}
+              myRank={myGlobalRank}
+            />
+          ) : (
+            <>
+              <LeaderboardList
+                entries={entries}
+                myUserId={user?.id || null}
+                hasMore={nextCursor !== null}
+                isLoadingMore={isLoadingMore}
+                onLoadMore={handleLoadMore}
+                isLoading={isLoading}
+                emptyText="Chưa có kỳ thủ nào hoàn thành định hạng (10 trận) cho trò chơi này."
+              />
+              {activeSeason && !isLoading && (
+                <MyRankFooter myRank={myRank} minMatches={MIN_MATCHES_FOR_LEADERBOARD} />
+              )}
+            </>
+          )}
+        </>
       )}
     </div>
   );

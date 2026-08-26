@@ -1,0 +1,100 @@
+name: Weekly Rating Decay
+
+# ==============================================================================
+# WORKFLOW TRỪ ĐIỂM BỎ ĐẤU ĐỊNH KỲ HÀNG TUẦN (WEEKLY RATING DECAY - P4.6c)
+# ==============================================================================
+#
+# NGUYÊN TẮC HOẠT ĐỘNG:
+# 1. CHỐNG CẮM HẠNG BẬC CAO:
+#    - Quét và trừ 10 điểm Elo/tuần cho các kỳ thủ bậc cao (Rating > 1600 - Kim Cương)
+#      không thi đấu trong hơn 30 ngày qua (last_played_at < now() - 30 days).
+#    - Giữ sàn 1600 không bị rớt xuống dưới mốc Kim Cương.
+# 2. TÍNH LŨY SUY IDEMPOTENT THEO TUẦN (ISO WEEK):
+#    - Mỗi lần chạy tự động ghi log vào `public.rating_decay_log` với khóa
+#      `week_key = to_char(now() AT TIME ZONE 'Asia/Ho_Chi_Minh', 'IYYY-IW')`.
+#    - Nếu workflow chạy trùng hoặc kích hoạt lại nhiều lần trong tuần, hệ thống
+#      tự động bỏ qua các tài khoản đã được xử lý trong tuần đó.
+# ==============================================================================
+
+on:
+  schedule:
+    # Chạy tự động hàng tuần vào 20:00 UTC tối Chủ Nhật (03:00 sáng Thứ Hai giờ VN)
+    - cron: '0 20 * * 0'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Môi trường thực thi (dev hoặc prod)'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - prod
+
+concurrency:
+  group: weekly-rating-decay
+  cancel-in-progress: false
+
+jobs:
+  decay:
+    name: Execute Rating Decay (${{ github.event.inputs.environment || 'dev' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 1. Nạp biến môi trường & Masking Secrets
+        id: setup
+        env:
+          TARGET_ENV: ${{ github.event.inputs.environment || 'dev' }}
+          DEV_URL: ${{ secrets.DECAY_SUPABASE_URL_DEV || secrets.RLS_SUPABASE_URL_DEV || secrets.KEEPALIVE_SUPABASE_URL_DEV }}
+          DEV_KEY: ${{ secrets.DECAY_SERVICE_ROLE_DEV || secrets.RLS_SERVICE_ROLE_DEV || secrets.KEEPALIVE_SERVICE_ROLE_DEV }}
+          PROD_URL: ${{ secrets.DECAY_SUPABASE_URL_PROD || secrets.KEEPALIVE_SUPABASE_URL_PROD }}
+          PROD_KEY: ${{ secrets.DECAY_SERVICE_ROLE_PROD || secrets.KEEPALIVE_SERVICE_ROLE_PROD }}
+        run: |
+          if [ "$TARGET_ENV" = "prod" ]; then
+            URL="$PROD_URL"
+            KEY="$PROD_KEY"
+          else
+            URL="$DEV_URL"
+            KEY="$DEV_KEY"
+          fi
+
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then
+            echo "❌ [ERROR] Thiếu secret URL hoặc SERVICE_ROLE_KEY cho môi trường '$TARGET_ENV'."
+            echo "   Vui lòng cấu hình DECAY_SUPABASE_URL_${TARGET_ENV^^} và DECAY_SERVICE_ROLE_${TARGET_ENV^^} trong GitHub Secrets."
+            exit 1
+          fi
+
+          echo "::add-mask::$URL"
+          echo "::add-mask::$KEY"
+
+          echo "supabase_url=$URL" >> "$GITHUB_OUTPUT"
+          echo "service_key=$KEY" >> "$GITHUB_OUTPUT"
+
+      - name: 2. Gọi Stored Procedure apply_rating_decay qua PostgREST API
+        env:
+          SUPABASE_URL: ${{ steps.setup.outputs.supabase_url }}
+          SERVICE_KEY: ${{ steps.setup.outputs.service_key }}
+        run: |
+          echo "⏳ Đang gửi request tới Stored Procedure apply_rating_decay..."
+          
+          HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "${SUPABASE_URL}/rest/v1/rpc/apply_rating_decay" \
+            -H "apikey: ${SERVICE_KEY}" \
+            -H "Authorization: Bearer ${SERVICE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{}')
+
+          HTTP_BODY=$(echo "$HTTP_RESPONSE" | sed '$d')
+          HTTP_STATUS=$(echo "$HTTP_RESPONSE" | tail -n 1)
+
+          echo "📡 HTTP Status Code: $HTTP_STATUS"
+
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "❌ [FAILED] Gọi hàm apply_rating_decay thất bại! Mã lỗi: $HTTP_STATUS"
+            echo "   Chi tiết lỗi: $HTTP_BODY"
+            exit 1
+          fi
+
+          echo "✅ [SUCCESS] Kết quả xử lý Decay:"
+          echo "$HTTP_BODY"

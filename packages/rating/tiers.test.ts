@@ -407,4 +407,29 @@ describe('5. Property Tests: Tính Liền Mạch & Bất Biến Của Bảng Án
       expect(() => compareTiers('gold', 'unknown' as unknown as TierId)).toThrow(RangeError);
     });
   });
+
+  describe('7. Hợp Đồng Đồng Bộ SQL Mapping (SQL Tier Contract Verification)', () => {
+    // Hàm mô phỏng logic SQL public.get_tier_by_rating(p_rating numeric) trong migration 0021_close_season.sql
+    function sqlGetTierByRating(rating: number): string {
+      if (rating >= 1800) return 'master';
+      if (rating >= 1600) return 'diamond';
+      if (rating >= 1400) return 'platinum';
+      if (rating >= 1200) return 'gold';
+      if (rating >= 1000) return 'silver';
+      return 'bronze';
+    }
+
+    it('7.1 Mọi mốc điểm biên trong TIER_TABLE đều khớp 100% giữa TypeScript và SQL helper get_tier_by_rating', () => {
+      const testRatings = [
+        0, 100, 500, 999, 1000, 1001, 1199, 1200, 1201, 1399, 1400, 1401, 1599, 1600, 1601, 1799,
+        1800, 1801, 2500, 3000,
+      ];
+
+      for (const r of testRatings) {
+        const tsTier = getTierByRating(r).id;
+        const sqlTier = sqlGetTierByRating(r);
+        expect(sqlTier).toBe(tsTier);
+      }
+    });
+  });
 });
