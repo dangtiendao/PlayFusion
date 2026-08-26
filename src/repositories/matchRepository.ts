@@ -416,7 +416,6 @@ export async function getMyActiveMatches(): Promise<ActiveMatchItem[]> {
       .eq('user_id', userId)
       .is('matches.ended_at', null)
       .in('matches.mode', ['online_1v1', 'online_correspondence'])
-      .order('created_at', { ascending: false })
       .limit(10);
 
     if (partErr || !myParts || myParts.length === 0) return [];

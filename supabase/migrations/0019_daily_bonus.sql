@@ -101,8 +101,8 @@ BEGIN
       v_coins,
       v_new_balance,
       'daily_bonus',
-      'system',
-      gen_random_uuid(),
+      NULL,
+      NULL,
       v_idempotency_key
     );
 

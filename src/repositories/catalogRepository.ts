@@ -35,8 +35,8 @@ interface DbGameRow {
 interface DbSeasonRow {
   id: number;
   name: string;
-  start_at: string;
-  end_at: string | null;
+  started_at: string;
+  ended_at: string | null;
   is_active: boolean;
 }
 
@@ -84,8 +84,8 @@ function mapDbRowToSeason(row: DbSeasonRow): Season {
   return {
     id: row.id,
     name: row.name,
-    startedAt: row.start_at,
-    endedAt: row.end_at,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
     isActive: row.is_active,
   };
 }
@@ -141,7 +141,7 @@ export async function getActiveSeason(): Promise<Season | null> {
   try {
     const { data, error } = await supabase
       .from('seasons')
-      .select('id, name, start_at, end_at, is_active')
+      .select('id, name, started_at, ended_at, is_active')
       .eq('is_active', true)
       .maybeSingle();
 

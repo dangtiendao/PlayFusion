@@ -164,7 +164,7 @@ export async function getMyLastRankedMatchDelta(
     let query = supabase
       .from('match_participants')
       .select(
-        'rating_before, rating_after, created_at, matches!inner(game_id, is_ranked, season_id)',
+        'rating_before, rating_after, matches!inner(game_id, is_ranked, season_id, created_at)',
       )
       .eq('user_id', user.id)
       .not('rating_before', 'is', null)
@@ -177,7 +177,7 @@ export async function getMyLastRankedMatchDelta(
     }
 
     const { data, error } = await query
-      .order('created_at', { ascending: false })
+      .order('created_at', { referencedTable: 'matches', ascending: false })
       .limit(1)
       .maybeSingle();
 
