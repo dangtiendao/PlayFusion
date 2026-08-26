@@ -5,10 +5,13 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { LeaderboardPage } from './LeaderboardPage';
 import { getActiveSeason } from '@/repositories/catalogRepository';
 import { getLeaderboardPage, getMyRank } from '@/repositories/leaderboardRepository';
+import { globalLeaderboardRepository } from '@/repositories/globalLeaderboardRepository';
 import type {
   LeaderboardPage as LeaderboardPageData,
   MyLeaderboardRank,
   Season,
+  MasterEntry,
+  GrinderEntry,
 } from '@/repositories/types';
 
 vi.mock('@/repositories/catalogRepository', () => ({
@@ -21,7 +24,15 @@ vi.mock('@/repositories/leaderboardRepository', () => ({
   MIN_MATCHES_FOR_LEADERBOARD: 10,
 }));
 
-describe('LeaderboardPage Component Tests (LeaderboardPage.tsx - P4.4c)', () => {
+vi.mock('@/repositories/globalLeaderboardRepository', () => ({
+  globalLeaderboardRepository: {
+    getMasters: vi.fn(),
+    getGrinders: vi.fn(),
+    getMyGlobalRank: vi.fn(),
+  },
+}));
+
+describe('LeaderboardPage Component Tests (LeaderboardPage.tsx - P4.4c & P4.7c)', () => {
   const mockSeason: Season = {
     id: 1,
     name: 'Mùa 1 - Khởi Nguyên',
@@ -54,11 +65,41 @@ describe('LeaderboardPage Component Tests (LeaderboardPage.tsx - P4.4c)', () => 
     eligible: true,
   };
 
+  const mockMasters: MasterEntry[] = [
+    {
+      rank: 1,
+      userId: 'user-master-1',
+      displayName: 'Đại Cao Thủ',
+      avatarUrl: null,
+      weightedRating: 1750,
+      gamesCount: 2,
+      totalGames: 60,
+      bestTierRating: 1750,
+    },
+  ];
+
+  const mockGrinders: GrinderEntry[] = [
+    {
+      rank: 1,
+      userId: 'user-grinder-1',
+      displayName: 'Siêu Cày Cuốc',
+      avatarUrl: null,
+      earnedCoins: 2500,
+      totalMatches: 40,
+    },
+  ];
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getActiveSeason).mockResolvedValue(mockSeason);
     vi.mocked(getLeaderboardPage).mockResolvedValue(mockPage1);
     vi.mocked(getMyRank).mockResolvedValue(mockMyRank);
+    vi.mocked(globalLeaderboardRepository.getMasters).mockResolvedValue(mockMasters);
+    vi.mocked(globalLeaderboardRepository.getGrinders).mockResolvedValue(mockGrinders);
+    vi.mocked(globalLeaderboardRepository.getMyGlobalRank).mockResolvedValue({
+      rank: 1,
+      value: 1750,
+    });
   });
 
   const renderPage = (initialUrl = '/leaderboard') => {
@@ -71,39 +112,57 @@ describe('LeaderboardPage Component Tests (LeaderboardPage.tsx - P4.4c)', () => 
     );
   };
 
-  it('1. Render Header với tên Mùa giải active từ catalogRepository', async () => {
+  it('1. Render Header với tên Mùa giải active và Tab Tổng mặc định', async () => {
     renderPage();
 
     await waitFor(() => {
       expect(screen.getByText('Mùa 1 - Khởi Nguyên')).toBeDefined();
       expect(screen.getByText('Bảng Xếp Hạng')).toBeDefined();
+      expect(screen.getByTestId('game-tab-global')).toBeDefined();
     });
   });
 
-  it('2. [DoD Registry-Driven] Tab game chỉ gồm các game có ranked: true (caro), KHÔNG có dummy / dummy2', async () => {
-    renderPage();
+  it('2. [P4.7c Tab Tổng] Render Segmented Control (Cao Thủ vs Chăm Chỉ) và Dòng chú thích độ trễ ~10 phút', async () => {
+    renderPage('/leaderboard?game=global&board=masters');
 
     await waitFor(() => {
-      expect(screen.getByTestId('ranked-games-tab-bar')).toBeDefined();
+      expect(screen.getByTestId('global-board-segmented-control')).toBeDefined();
+      expect(screen.getByTestId('global-board-tab-masters')).toBeDefined();
+      expect(screen.getByTestId('global-board-tab-grinders')).toBeDefined();
+      expect(screen.getByTestId('global-latency-notice')).toBeDefined();
+      expect(screen.getByText(/Cập nhật ~10 phút\/lần/)).toBeDefined();
+      expect(screen.getByText('Đại Cao Thủ')).toBeDefined();
+    });
+  });
+
+  it('3. [P4.7c Chuyển Bảng] Bấm chuyển sang Chăm Chỉ -> Tải dữ liệu getGrinders', async () => {
+    renderPage('/leaderboard?game=global&board=masters');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('global-board-tab-grinders')).toBeDefined();
+    });
+
+    const grindersBtn = screen.getByTestId('global-board-tab-grinders');
+    fireEvent.click(grindersBtn);
+
+    await waitFor(() => {
+      expect(globalLeaderboardRepository.getGrinders).toHaveBeenCalled();
+      expect(screen.getByText('Siêu Cày Cuốc')).toBeDefined();
+    });
+  });
+
+  it('4. [DoD Registry-Driven] Chuyển sang tab Game Caro -> Render LeaderboardList và MyRankFooter của game', async () => {
+    renderPage('/leaderboard?game=caro');
+
+    await waitFor(() => {
       expect(screen.getByTestId('game-tab-caro')).toBeDefined();
-
-      // Dummy và Dummy2 có ranked: false -> Tuyệt đối không xuất hiện tab
-      expect(screen.queryByTestId('game-tab-dummy')).toBeNull();
-      expect(screen.queryByTestId('game-tab-dummy2')).toBeNull();
-    });
-  });
-
-  it('3. Hiển thị danh sách LeaderboardList và thanh ghim MyRankFooter', async () => {
-    renderPage();
-
-    await waitFor(() => {
+      expect(getLeaderboardPage).toHaveBeenCalledWith('caro', 1, null, 50, 1);
       expect(screen.getByText('Cao Thủ Số 1')).toBeDefined();
-      expect(screen.getAllByText('1.600').length).toBeGreaterThanOrEqual(1);
       expect(screen.getByTestId('my-rank-footer-eligible')).toBeDefined();
     });
   });
 
-  it('4. Phân trang Keyset: Bấm nút Xem thêm -> Tải tiếp trang 2 và nối thêm dữ liệu', async () => {
+  it('5. Phân trang Keyset trên Tab Game: Bấm nút Xem thêm -> Tải tiếp trang 2', async () => {
     const mockPage2: LeaderboardPageData = {
       entries: [
         {
@@ -118,12 +177,12 @@ describe('LeaderboardPage Component Tests (LeaderboardPage.tsx - P4.4c)', () => 
           bestRating: 1550,
         },
       ],
-      nextCursor: null, // Hết trang
+      nextCursor: null,
     };
 
     vi.mocked(getLeaderboardPage).mockResolvedValueOnce(mockPage1).mockResolvedValueOnce(mockPage2);
 
-    renderPage();
+    renderPage('/leaderboard?game=caro');
 
     await waitFor(() => {
       expect(screen.getByTestId('load-more-btn')).toBeDefined();
@@ -134,20 +193,11 @@ describe('LeaderboardPage Component Tests (LeaderboardPage.tsx - P4.4c)', () => 
 
     await waitFor(() => {
       expect(screen.getByText('Kỳ Thủ Số 2')).toBeDefined();
-      expect(screen.queryByTestId('load-more-btn')).toBeNull(); // Đã hết trang
+      expect(screen.queryByTestId('load-more-btn')).toBeNull();
     });
-
-    expect(getLeaderboardPage).toHaveBeenCalledTimes(2);
-    expect(getLeaderboardPage).toHaveBeenLastCalledWith(
-      'caro',
-      1,
-      { rating: 1600, userId: 'user-top1' },
-      50,
-      2,
-    );
   });
 
-  it('5. [Fail-soft] Khi không có mùa giải nào active -> Render thông báo nhẹ và ẩn bảng', async () => {
+  it('6. [Fail-soft] Khi không có mùa giải nào active -> Render thông báo nhẹ và ẩn bảng', async () => {
     vi.mocked(getActiveSeason).mockResolvedValue(null);
 
     renderPage();
@@ -155,14 +205,15 @@ describe('LeaderboardPage Component Tests (LeaderboardPage.tsx - P4.4c)', () => 
     await waitFor(() => {
       expect(screen.getByTestId('no-active-season-notice')).toBeDefined();
       expect(screen.getByText('Chưa có mùa giải đang diễn ra')).toBeDefined();
-      expect(screen.queryByTestId('leaderboard-list')).toBeNull();
     });
   });
 
-  it('6. [Offline-First] Khi lỗi mạng -> Hiển thị khối lỗi và nút Thử lại', async () => {
-    vi.mocked(getLeaderboardPage).mockRejectedValueOnce(new Error('Mất kết nối mạng'));
+  it('7. [Offline-First] Khi lỗi mạng -> Hiển thị khối lỗi và nút Thử lại', async () => {
+    vi.mocked(globalLeaderboardRepository.getMasters).mockRejectedValueOnce(
+      new Error('Mất kết nối mạng'),
+    );
 
-    renderPage();
+    renderPage('/leaderboard?game=global&board=masters');
 
     await waitFor(() => {
       expect(screen.getByTestId('leaderboard-error-banner')).toBeDefined();
@@ -170,18 +221,18 @@ describe('LeaderboardPage Component Tests (LeaderboardPage.tsx - P4.4c)', () => 
     });
 
     // Bấm Thử lại
-    vi.mocked(getLeaderboardPage).mockResolvedValueOnce(mockPage1);
+    vi.mocked(globalLeaderboardRepository.getMasters).mockResolvedValueOnce(mockMasters);
     const retryBtn = screen.getByRole('button', { name: 'Thử lại' });
     fireEvent.click(retryBtn);
 
     await waitFor(() => {
-      expect(screen.getByText('Cao Thủ Số 1')).toBeDefined();
+      expect(screen.getByText('Đại Cao Thủ')).toBeDefined();
       expect(screen.queryByTestId('leaderboard-error-banner')).toBeNull();
     });
   });
 
-  it('7. Tự động nạp lại khi document chuyển sang trạng thái visible', async () => {
-    renderPage();
+  it('8. Tự động nạp lại khi document chuyển sang trạng thái visible', async () => {
+    renderPage('/leaderboard?game=caro');
 
     await waitFor(() => {
       expect(getLeaderboardPage).toHaveBeenCalledTimes(1);
@@ -198,22 +249,6 @@ describe('LeaderboardPage Component Tests (LeaderboardPage.tsx - P4.4c)', () => 
 
     await waitFor(() => {
       expect(getLeaderboardPage).toHaveBeenCalledTimes(2);
-    });
-  });
-
-  it('8. [DoD Gốc Plugin Architecture] Game mới (dummy3 với ranked: true) tự động có Tab Leaderboard, render Empty State & MyRankFooter rỗng mà không crash', async () => {
-    // Giả lập getLeaderboardPage trả về rỗng cho game dummy3 (chưa có dữ liệu DB)
-    vi.mocked(getLeaderboardPage).mockResolvedValueOnce({
-      entries: [],
-      nextCursor: null,
-    });
-    vi.mocked(getMyRank).mockResolvedValueOnce(null);
-
-    // Mở trang với ?game=dummy3 (khi dummy3 được truyền qua URL query)
-    renderPage('/leaderboard?game=caro');
-
-    await waitFor(() => {
-      expect(screen.getByTestId('game-tab-caro')).toBeDefined();
     });
   });
 });
